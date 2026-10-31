@@ -114,7 +114,7 @@ function listenOnce(){
 }
 function applyListen(){if(S.always)listenOnce();else stopRec()}
 function handleSpeech(t){
-  const low=t.toLowerCase();const wake=/(jarvis|jarvıs|cervis|çarvis|carvis)/i;
+  t=t.replace(/^\s*(hey\s+|hey,?\s*)?(jarvis|jarvıs|cervis|çarvis|carvis|jarviz)[,.!]?\s*/i,'')||t;const low=t.toLowerCase();const wake=/(jarvis|jarvıs|cervis|çarvis|carvis)/i;
   if(S.always&&!conv&&awakeUntil<Date.now()){ if(!wake.test(low)){setState('idle');setTimeout(listenOnce,300);return} t=t.replace(/(hey\s+|hey,?\s*)?(jarvis|jarvıs|cervis|çarvis|carvis)[,.!]?\s*/i,'').trim(); if(!t){wakeUp();return} }
   awakeUntil=Date.now()+(S.always?0:0);
   run(t);
@@ -130,7 +130,8 @@ function dur(t){const m=t.match(/(\d+)\s*(saniye|sn|dakika|dk|saat)/);if(!m)retu
 async function local(t){
   const l=t.toLowerCase().replace(/[’']/g,"'");
   if(/^(uyu|uyku modu|uykuya geç|bekleme modu|dinlemeyi (bırak|kapat)|görüşürüz|kapan)\b/.test(l)){conv=false;setConv();return 'Tamam, beklemeye geçiyorum. Gerekirse elini aç.'}
-  if(/^(dur|sus|sessiz ol|yeter)\b/.test(l)){stopSpeech();setState('idle');return ''}
+  if(holoT<=0&&/^(dur|sus|sessiz ol|yeter)\b/.test(l)){stopSpeech();setState('idle');return ''}
+  if(holoT>0){const HC=holoCmd(l);if(HC!==null)return HC}
   if(/(hologram|ekrandan|ekrana).*(kapat|gizle|kaldır)|^(kapat|gizle)$|yansıtmayı (kapat|durdur)/.test(l)){holoT=0;return 'Hologramı kapattım.'}
   { const hk=holoKey(l); if(hk&&/yansıt|göster|hologram|incele|aç|getir|tara|ekrana/.test(l)){holoName=hk;holoT=1;exT=0;return HOLO_SAY[hk]} }
   if(/kaç.*saat|saat kaç|saati söyle/.test(l))return 'Saat '+new Date().toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})+'.';
@@ -186,7 +187,7 @@ async function run(text){
   if(busy)return;busy=true;log('u','› '+text);setState('think');clearInterval(window._iv);const t0s=Date.now(),iv=window._iv=setInterval(()=>{if(state==='think')$('state').textContent='düşünüyorum '+Math.round((Date.now()-t0s)/1000)+'s'},1000);
   try{
     let r=await local(text);
-    if(r===''){busy=false;return}
+    if(r===''){clearInterval(iv);busy=false;setState('idle');if(conv||S.always)setTimeout(listenOnce,250);return}
     if(r){log('j',r);hist.push({r:'u',t:text},{r:'a',t:r});busy=false;await say(r);return}
     let img=null;if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&camOn)img=grab();
     if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&!img)throw new Error('Kamera kapalı.');
@@ -215,6 +216,7 @@ async function startCam(){
     log('s','El takibi hazır: elini aç ve 1 sn tut, ya da iki elini birbirine vur.');hstat('el takibi hazır · el: 0');loopHands();
   }catch(e){hstat('el takibi hatası');const t=String(e.message||e);msg('El takibi yüklenemedi: '+t.slice(0,90),9000);log('s','El takibi hatası: '+t)}
 }
+const HS=[{},{}];let twoSeen=0,twoStart=0,dS=null,modeKey='',modeSince=0;
 let handNow=false,lastT=-1,openSince=0,prevN=0,twoRef=null,gb=null,handsView=[],glabel='',pinchNow=[];
 const BONES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 const hd=(h,a,b)=>Math.hypot(h[a].x-h[b].x,h[a].y-h[b].y);
@@ -235,11 +237,23 @@ function procHands(hs,now){
     label=idle?'bekle: el aç/çırp':conv?'dinliyorum':'';
   }else{
     openSince=0;
-    if(n===2){const A=palmC(hs[0]),B=palmC(hs[1]),d=Math.hypot(A.x-B.x,A.y-B.y),both=pinchOf(hs[0])&&pinchOf(hs[1]),m=both?'x':'z';
-      if(!twoRef||twoRef.m!==m)twoRef={d0:d,m,z0:zoomT,x0:exT};
-      if(m==='z'){zoomT=clamp(twoRef.z0*d/Math.max(.05,twoRef.d0),.6,2.4);label='YAKLAŞTIR'}else{exT=clamp(twoRef.x0+(d-twoRef.d0)*3.2,0,1);label='PARÇALA'}gb=null}
-    else{twoRef=null;
-      if(n===1){const h=hs[0],c=palmC(h);if(pinchOf(h)){if(gb){yawT+=-(c.x-gb.x)*9;pitchT=clamp(pitchT+(c.y-gb.y)*5,-1.2,1.2)}gb={x:c.x,y:c.y};label='DÖNDÜR'}else{gb=null;label='tut: parmakları birleştir'}}else{gb=null;label='el göster'}}
+    for(let i=0;i<n;i++){const h=hs[i],c9={x:h[9].x,y:h[9].y},r=hd(h,4,8)/(hd(h,0,9)+1e-4),S0=HS[i];
+      if(!S0.has){S0.x=c9.x;S0.y=c9.y;S0.pin=r<.4;S0.has=true}else{S0.x+=(c9.x-S0.x)*.4;S0.y+=(c9.y-S0.y)*.4;if(!S0.pin&&r<.34)S0.pin=true;else if(S0.pin&&r>.52)S0.pin=false}}
+    for(let i=n;i<2;i++)HS[i].has=false;
+    if(n===2){
+      if(!twoStart)twoStart=now;twoSeen=now;
+      const d=Math.hypot(HS[0].x-HS[1].x,HS[0].y-HS[1].y);dS=dS==null?d:dS+(d-dS)*.3;
+      const m=HS[0].pin&&HS[1].pin?'x':'z';if(m!==modeKey){modeKey=m;modeSince=now;twoRef=null}
+      if(now-twoStart>250&&now-modeSince>250){
+        if(!twoRef)twoRef={d0:dS,z0:zoomT,x0:exT};
+        if(m==='z'){zoomT=clamp(twoRef.z0*Math.pow(dS/Math.max(.06,twoRef.d0),1.15),.6,2.6);label='YAKLAŞTIR '+Math.round(zoomT*100)+'%'}
+        else{exT=clamp(twoRef.x0+(dS-twoRef.d0)*3.2,0,1);label='PARÇALA '+Math.round(exT*100)+'%'}}
+      else label='iki el: hazırlanıyor';
+      gb=null}
+    else{
+      if(twoRef&&now-twoSeen>400){twoRef=null;twoStart=0;dS=null;modeKey='';}
+      if(!twoRef&&now-twoSeen>400)twoStart=0;
+      if(n===1){const S0=HS[0];if(S0.pin){if(gb){const dx=S0.x-gb.x,dy=S0.y-gb.y;if(Math.abs(dx)>.003)yawT+=-dx*9;if(Math.abs(dy)>.003)pitchT=clamp(pitchT+dy*5,-1.2,1.2)}gb={x:S0.x,y:S0.y};label='DÖNDÜR'}else{gb=null;label='tut: parmakları birleştir'}}else{gb=null;label=twoRef?'toparlanıyor':'el göster'}}
   }
   prevN=n;const txt='el takibi · el: '+n+(label?' · '+label:'');if(txt!==hstat.last){hstat.last=txt;hstat(txt)}
 }
@@ -347,6 +361,24 @@ function drawMesh(g,cx,cy,sc,t,a,parts,cA){
   g.strokeStyle='rgba(90,200,255,'+.4*a+')';g.lineWidth=1;const fy=parts===HELM?-1.5:-4.75-cA*0+(-0);
   for(let r=1;r<=3;r++){g.beginPath();for(let j=0;j<=48;j++){const an=j/48*TAU+t*.3,X=Math.cos(an)*r*1.1,Z=Math.sin(an)*r*1.1,y=(parts===HELM?-3.2:-4.6-(-cA));const v=V(X,y,Z),ps=F/(F+v[2]+3),px=cx+v[0]*sc*ps,py=cy-v[1]*sc*ps;j?g.lineTo(px,py):g.moveTo(px,py)}g.stroke()}
   g.restore()}
+function holoCmd(l){
+  const more=/biraz|azıcık|bi tık/.test(l)?1.15:1.4;
+  if(/yakınlaş|yaklaş|büyüt|zoom|yaklaştır|daha büyük/.test(l)){zoomT=clamp(zoomT*more,.6,2.6);return''}
+  if(/uzaklaş|küçült|uzaklaştır|daha küçük/.test(l)){zoomT=clamp(zoomT/more,.6,2.6);return''}
+  if(/parçala|ayır|patlat|dağıt|parçalara/.test(l)){exT=1;return''}
+  if(/birleştir|topla|bir araya|montajla/.test(l)){exT=0;return''}
+  if(/sağa/.test(l)){spinOn=false;yawT+=.9;return''}
+  if(/sola/.test(l)){spinOn=false;yawT-=.9;return''}
+  if(/yukarı|üstten/.test(l)){pitchT=clamp(pitchT-.5,-1.2,1.2);return''}
+  if(/aşağı|alttan/.test(l)){pitchT=clamp(pitchT+.5,-1.2,1.2);return''}
+  if(/arka|arkadan/.test(l)){spinOn=false;yawT=Math.round(yawT/TAU)*TAU+Math.PI;return''}
+  if(/yan/.test(l)&&/görünüm|taraf|yandan/.test(l)){spinOn=false;yawT=Math.round(yawT/TAU)*TAU+Math.PI/2;return''}
+  if(/ön|karşı|düz/.test(l)&&/görünüm|ön|dön/.test(l)){spinOn=false;yawT=Math.round(yawT/TAU)*TAU;pitchT=-.1;return''}
+  if(/^(dön|döndür|kendi etrafında|otomatik dön)/.test(l)){spinOn=true;return''}
+  if(/^(dur|sabit|sabitle|durdur)/.test(l)){spinOn=false;return''}
+  if(/sıfırla|baştan/.test(l)){zoomT=1;exT=0;pitchT=-.1;spinOn=true;return''}
+  return null}
+let spinOn=true;
 /* ---------- orb ---------- */
 const cv=$('orb'),g=cv.getContext('2d');let W=0,H=0,DPR=1,pulse=0,t0=performance.now();
 function rs(){DPR=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR}rs();addEventListener('resize',rs);
@@ -354,7 +386,7 @@ const COL={idle:[77,139,255],listen:[90,230,255],think:[255,170,60],speak:[255,6
 const dots=Array.from({length:70},()=>({a:Math.random()*TAU,r:.55+Math.random()*.75,s:(Math.random()-.5)*.5,z:Math.random()}));
 function orb(now){
   requestAnimationFrame(orb);const t=(now-t0)/1000;const tc=COL[state]||COL.idle;for(let i=0;i<3;i++)cur[i]+=(tc[i]-cur[i])*.08;
-  rot+=(rotT-rot)*.08;zoom+=(zoomT-zoom)*.08;pulse*=.94;holoA+=(holoT-holoA)*.07;document.body.classList.toggle('holo',holoT>0);if(!dragging&&!handNow){yawT+=.004}yaw+=(yawT-yaw)*.12;pitch+=(pitchT-pitch)*.12;ex+=(exT-ex)*.1;
+  rot+=(rotT-rot)*.08;zoom+=(zoomT-zoom)*.08;pulse*=.94;holoA+=(holoT-holoA)*.07;document.body.classList.toggle('holo',holoT>0);if(!dragging&&!handNow&&spinOn){yawT+=.004}yaw+=(yawT-yaw)*.12;pitch+=(pitchT-pitch)*.12;ex+=(exT-ex)*.1;
   const target=state==='speak'?.5+.5*Math.sin(t*14)*Math.sin(t*5.3)+.2:state==='listen'?.35+.2*Math.sin(t*3):.08;lvl+=(target-lvl)*.15;
   g.setTransform(DPR,0,0,DPR,0,0);g.fillStyle='rgba(4,6,11,.28)';g.fillRect(0,0,W,H);
   const hv=holoA,cx=W/2,cy=H*(.4-.3*hv),R=Math.min(W,H)*.26*(1-.7*hv)*(hv>.5?1:zoom)*(1+pulse*.15+lvl*.06),c=`${cur[0]|0},${cur[1]|0},${cur[2]|0}`;
