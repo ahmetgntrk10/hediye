@@ -46,7 +46,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--t);font-family:s
 <div id="msg"></div>
 <div id="log"></div>
 <form id="bar"><input id="txt" placeholder="Yaz veya &quot;Jarvis&quot; de…" autocomplete="off"><button class="btn" type="submit">gönder</button></form>
-<div id="start"><h1>JARVIS</h1><p>Kamera ve mikrofon izni isteyecek. Ellerini birbirine vurunca uyanır, sesle komut alır. Görüntü telefondan dışarı çıkmaz; sadece yazdıkların ve söylediklerin yapay zeka servisine gider.</p><button id="go">BAŞLAT</button><button class="btn" id="bSet2">anahtarları gir</button></div>
+<div id="start"><h1>JARVIS</h1><p>Kamera ve mikrofon izni isteyecek. Elini açıp 1 saniye tutunca ya da ellerini birbirine vurunca uyanır, sesle komut alır. Görüntü telefondan dışarı çıkmaz; sadece yazdıkların ve söylediklerin yapay zeka servisine gider.</p><button id="go">BAŞLAT</button><button class="btn" id="bSet2">anahtarları gir</button></div>
 <div id="set">
 <h3>AYARLAR</h3>
 <label>Gemini anahtarı</label><input type="password" id="kG" autocomplete="off" placeholder="AIza…">
@@ -164,18 +164,25 @@ async function run(text){
 /* ---------- camera + hands ---------- */
 let camOn=false,hl=null,vid=$('vid'),ov=$('ov'),oc=ov.getContext('2d'),prevD=null,apartAt=0,lastClap=0,handsSeen=0;
 function grab(){try{const c=document.createElement('canvas');const w=vid.videoWidth,h=vid.videoHeight,s=Math.min(1,640/Math.max(w,h));c.width=w*s;c.height=h*s;c.getContext('2d').drawImage(vid,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.8).split(',')[1]}catch(e){return null}}
+function hstat(t){let e=$('hs');if(!e){e=document.createElement('div');e.id='hs';e.style.cssText='position:fixed;left:14px;top:calc(46px + env(safe-area-inset-top));z-index:6;font:600 10px var(--mono);letter-spacing:.14em;color:#7d86a3;text-transform:uppercase;max-width:70vw';document.body.appendChild(e)}e.textContent=t}
+async function loadMP(){
+  const V='0.10.14',bases=['https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@'+V,'https://unpkg.com/@mediapipe/tasks-vision@'+V];let err;
+  for(const b of bases){try{const m=await import(b+'/vision_bundle.mjs');const fs=await m.FilesetResolver.forVisionTasks(b+'/wasm');return{m,fs}}catch(e){err=e}}
+  throw err}
 async function startCam(){
+  hstat('kamera açılıyor…');
   try{const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});vid.srcObject=st;await vid.play();camOn=true;$('cam').classList.toggle('on',S.prev);}
-  catch(e){msg('Kamera açılamadı: el hareketi olmadan devam. ('+e.name+')',6000);return}
+  catch(e){hstat('kamera yok: '+e.name);msg('Kamera açılamadı ('+e.name+'). Tarayıcı ayarlarından kamera iznini aç.',8000);return}
   try{
-    const V='0.10.14',m=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@'+V+'/vision_bundle.mjs');
-    const fs=await m.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@'+V+'/wasm');
-    const opt=d=>({baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:d},runningMode:'VIDEO',numHands:2});
+    hstat('el takibi yükleniyor…');
+    const{m,fs}=await loadMP();
+    const opt=d=>({baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:d},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:.4,minHandPresenceConfidence:.4,minTrackingConfidence:.4});
     try{hl=await m.HandLandmarker.createFromOptions(fs,opt('GPU'))}catch(e){hl=await m.HandLandmarker.createFromOptions(fs,opt('CPU'))}
-    log('s','El takibi hazır: ellerini birbirine vur.');loopHands();
-  }catch(e){msg('El takibi yüklenemedi (internet?). Ses ve yazı çalışır.',6000);log('s','El takibi yok: '+e.message)}
+    log('s','El takibi hazır: elini aç ve 1 sn tut, ya da iki elini birbirine vur.');hstat('el takibi hazır · el: 0');loopHands();
+  }catch(e){hstat('el takibi hatası');const t=String(e.message||e);msg('El takibi yüklenemedi: '+t.slice(0,90),9000);log('s','El takibi hatası: '+t)}
 }
-let lastT=-1;
+let lastT=-1,openSince=0,prevN=0,twoAt=0;
+function palmOpen(h){const up=(t,b)=>Math.hypot(h[t].x-h[0].x,h[t].y-h[0].y)>Math.hypot(h[b].x-h[0].x,h[b].y-h[0].y)*1.25;return up(8,6)&&up(12,10)&&up(16,14)&&up(20,18)}
 function loopHands(){
   requestAnimationFrame(loopHands);if(!hl||vid.readyState<2||vid.currentTime===lastT)return;lastT=vid.currentTime;
   let res;try{res=hl.detectForVideo(vid,performance.now())}catch(e){return}
@@ -184,16 +191,21 @@ function loopHands(){
   for(const h of hs)for(const p of h){oc.beginPath();oc.arc(p.x*W,p.y*H,3,0,TAU);oc.fill()}
   const pc=h=>{let x=0,y=0;for(const i of[0,5,9,13,17]){x+=h[i].x;y+=h[i].y}return{x:x/5,y:y/5}};
   const now=performance.now();
+  if(hs.length!==handsSeen){handsSeen=hs.length;hstat('el takibi hazır · el: '+hs.length)}
   if(hs.length>=1)lastHand=now;
   if(hs.length===2){
-    const a=pc(hs[0]),b=pc(hs[1]),d=Math.hypot(a.x-b.x,(a.y-b.y)*.75);
-    if(d>.3)apartAt=now;
-    if(d<.14&&now-apartAt<700&&now-lastClap>2200){lastClap=now;clap()}
-    else if(d>.18){zoomT=clamp(.55+d*1.7,.7,1.9)}
-  }else if(hs.length===1){const a=pc(hs[0]);rotT=(.5-a.x)*5}
-  else{zoomT+=(1-zoomT)*.02;rotT*=.98}
+    const a=pc(hs[0]),b=pc(hs[1]),d=Math.hypot(a.x-b.x,a.y-b.y);twoAt=now;
+    if(d>.28)apartAt=now;
+    if(d<.2&&now-apartAt<900&&now-lastClap>2200){lastClap=now;clap()}
+    else if(d>.2){zoomT=clamp(.55+d*1.6,.7,1.9)}
+  }else{
+    if(prevN===2&&now-apartAt<500&&now-lastClap>2200){lastClap=now;clap()}
+    if(hs.length===1){const a=pc(hs[0]);rotT=(.5-a.x)*5}else{zoomT+=(1-zoomT)*.02;rotT*=.98}
+  }
+  prevN=hs.length;
+  if(hs.length===1&&palmOpen(hs[0])){if(!openSince)openSince=now;if(now-openSince>900&&now-lastClap>2500){lastClap=now;openSince=0;clap()}}else openSince=0;
 }
-function clap(){if(!started||busy)return;log('s','👏 el çırpma algılandı');if(speaking){speechSynthesis.cancel();speaking=false}pulse=1.4;awakeUntil=Date.now()+8000;try{navigator.vibrate&&navigator.vibrate(60)}catch(e){}
+function clap(){if(!started||busy)return;log('s','Hareket algılandı');if(speaking){speechSynthesis.cancel();speaking=false}pulse=1.4;awakeUntil=Date.now()+8000;try{navigator.vibrate&&navigator.vibrate(60)}catch(e){}
   if(!hist.length&&!S.kG&&!S.kD)say('Merhaba. Başlamak için ayarlardan anahtarını gir.');else{stopRec();say('Seni dinliyorum.')}}
 /* ---------- orb ---------- */
 const cv=$('orb'),g=cv.getContext('2d');let W=0,H=0,DPR=1,pulse=0,t0=performance.now();
@@ -224,7 +236,7 @@ $('go').onclick=async()=>{
   $('start').style.display='none';started=true;setState('idle');
   try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}catch(e){}
   log('s','JARVIS çevrimiçi.');if(!S.kG&&!S.kD){log('s','Önce sağ üstten "ayar" → anahtarlarını gir.')}
-  await startCam();applyListen();
+  try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}await startCam();applyListen();
   say('Merhaba. Sistemler hazır.');
 };
 if(!SR)$('bMic').style.display='none';
