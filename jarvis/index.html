@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#04060b">
+<title>JARVIS</title>
+<style>
+:root{--bg:#04060b;--c:#4d8bff;--t:#e8ecf8;--m:#7d86a3;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--t);font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
+#orb{position:fixed;inset:0;width:100%;height:100%}
+#cam{position:fixed;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));width:96px;height:128px;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.14);opacity:0;transition:.4s;z-index:4;background:#000}
+#cam.on{opacity:.9}#cam video,#cam canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#top{position:fixed;top:calc(12px + env(safe-area-inset-top));left:12px;right:12px;display:flex;justify-content:space-between;align-items:center;z-index:5;font:600 11px var(--mono);letter-spacing:.2em;text-transform:uppercase}
+#state{color:var(--m)}
+.btn{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);color:#b6bdd6;border-radius:999px;padding:9px 13px;font:600 11px var(--mono);letter-spacing:.14em;text-transform:uppercase;cursor:pointer;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.btn.on{color:#fff;border-color:var(--c);box-shadow:0 0 16px rgba(77,139,255,.3)}
+#log{position:fixed;left:0;right:116px;bottom:calc(66px + env(safe-area-inset-bottom));max-height:34vh;overflow-y:auto;padding:0 14px;z-index:3;font-size:15px;line-height:1.45;-webkit-mask-image:linear-gradient(transparent,#000 22%);mask-image:linear-gradient(transparent,#000 22%)}
+#log div{margin:7px 0;animation:in .3s}
+#log .u{color:#8fb0ff;font-family:var(--mono);font-size:13px}#log .j{color:#fff}#log .s{color:var(--m);font-size:12px;font-family:var(--mono)}
+#log a{color:#ffb066}
+@keyframes in{from{opacity:0;transform:translateY(6px)}}
+#bar{position:fixed;left:12px;right:116px;bottom:calc(12px + env(safe-area-inset-bottom));display:flex;gap:8px;z-index:5}
+#bar input{flex:1;min-width:0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:999px;padding:12px 16px;color:#fff;font:15px system-ui;outline:none}
+#bar input:focus{border-color:var(--c)}
+#start{position:fixed;inset:0;z-index:20;background:radial-gradient(circle at 50% 40%,#0b1430,#04060b 70%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;text-align:center}
+#start h1{margin:0;font:700 34px var(--mono);letter-spacing:.5em;padding-left:.5em;background:linear-gradient(90deg,#fff,#4d8bff);-webkit-background-clip:text;background-clip:text;color:transparent}
+#start p{margin:0;color:var(--m);font-size:14px;max-width:320px;line-height:1.5}
+#go{background:linear-gradient(135deg,#4d8bff,#7b5cff);border:0;color:#fff;border-radius:999px;padding:16px 38px;font:700 14px var(--mono);letter-spacing:.2em;cursor:pointer;box-shadow:0 10px 40px rgba(77,139,255,.4)}
+#set{position:fixed;z-index:30;left:50%;top:50%;transform:translate(-50%,-48%);width:min(92vw,400px);max-height:88vh;overflow:auto;background:rgba(12,15,26,.92);border:1px solid rgba(255,255,255,.12);border-radius:20px;padding:18px;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);opacity:0;pointer-events:none;transition:.3s}
+#set.on{opacity:1;pointer-events:auto;transform:translate(-50%,-50%)}
+#set h3{margin:0 0 6px;font:700 12px var(--mono);letter-spacing:.2em}
+#set label{display:block;margin:12px 0 5px;font:600 10px var(--mono);letter-spacing:.16em;color:var(--m);text-transform:uppercase}
+#set input[type=password],#set input[type=text],#set select{width:100%;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:11px;color:#fff;font:14px var(--mono);outline:none}
+.sw{display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:14px}
+.sw input{width:20px;height:20px}
+#set small{display:block;margin-top:8px;color:var(--m);font-size:12px;line-height:1.4}
+#msg{position:fixed;z-index:25;left:14px;right:14px;top:70px;color:#ffb066;font:12px var(--mono);text-align:center;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="orb"></canvas>
+<div id="cam"><video id="vid" playsinline muted></video><canvas id="ov"></canvas></div>
+<div id="top"><span id="state">hazır değil</span><span style="display:flex;gap:6px"><button class="btn" id="bMic">dinle</button><button class="btn" id="bSet">ayar</button></span></div>
+<div id="msg"></div>
+<div id="log"></div>
+<form id="bar"><input id="txt" placeholder="Yaz veya &quot;Jarvis&quot; de…" autocomplete="off"><button class="btn" type="submit">gönder</button></form>
+<div id="start"><h1>JARVIS</h1><p>Kamera ve mikrofon izni isteyecek. Ellerini birbirine vurunca uyanır, sesle komut alır. Görüntü telefondan dışarı çıkmaz; sadece yazdıkların ve söylediklerin yapay zeka servisine gider.</p><button id="go">BAŞLAT</button><button class="btn" id="bSet2">anahtarları gir</button></div>
+<div id="set">
+<h3>AYARLAR</h3>
+<label>Gemini anahtarı</label><input type="password" id="kG" autocomplete="off" placeholder="AIza…">
+<label>DeepSeek anahtarı</label><input type="password" id="kD" autocomplete="off" placeholder="sk-…">
+<label>Yapay zeka</label><select id="eng"><option value="auto">Otomatik (en iyi çalışan)</option><option value="gemini">Sadece Gemini</option><option value="deepseek">Sadece DeepSeek</option></select>
+<div class="sw"><span>Hızlı mod (daha küçük model)</span><input type="checkbox" id="fast"></div>
+<div class="sw"><span>Hep dinle ("Jarvis" diye seslen)</span><input type="checkbox" id="always"></div>
+<div class="sw"><span>Kamera önizleme</span><input type="checkbox" id="prev" checked></div>
+<small>Anahtarlar sadece bu telefonun tarayıcısında saklanır. Model adı yazmana gerek yok, en iyi mevcut model otomatik seçilir.</small>
+<div style="display:flex;gap:8px;margin-top:14px"><button class="btn" id="sTest" style="flex:1">test et</button><button class="btn on" id="sSave" style="flex:1">kaydet</button></div>
+<small id="sInfo"></small>
+</div>
+<script type="module">
+const $=id=>document.getElementById(id),clamp=(v,a,b)=>v<a?a:v>b?b:v,TAU=Math.PI*2;
+const store={get(k,d){try{const v=localStorage.getItem('jv_'+k);return v===null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('jv_'+k,JSON.stringify(v))}catch(e){}}};
+const S={kG:store.get('kG',''),kD:store.get('kD',''),eng:store.get('eng','auto'),fast:store.get('fast',false),always:store.get('always',false),prev:store.get('prev',true)};
+let state='idle',started=false,speaking=false,awake=false,hist=[],lastHand=0,rot=0,rotT=0,zoom=1,zoomT=1,lvl=0;
+/* ---------- UI ---------- */
+function setState(s,t){state=s;$('state').textContent=t||({idle:'beklemede',listen:'dinliyorum',think:'düşünüyorum',speak:'konuşuyorum'}[s]||s)}
+function log(c,h){const d=document.createElement('div');d.className=c;if(h&&h.html)d.innerHTML=h.html;else d.textContent=h;$('log').appendChild(d);$('log').scrollTop=1e9;while($('log').children.length>40)$('log').firstChild.remove()}
+function msg(t,ms=4000){const e=$('msg');e.textContent=t;clearTimeout(msg.h);if(t)msg.h=setTimeout(()=>e.textContent='',ms)}
+const sp=$('set');function openSet(v){sp.classList.toggle('on',v===undefined?!sp.classList.contains('on'):v);if(sp.classList.contains('on')){$('kG').value=S.kG;$('kD').value=S.kD;$('eng').value=S.eng;$('fast').checked=S.fast;$('always').checked=S.always;$('prev').checked=S.prev}}
+$('bSet').onclick=()=>openSet();$('bSet2').onclick=()=>openSet(true);
+$('sSave').onclick=()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;S.always=$('always').checked;S.prev=$('prev').checked;for(const k in S)store.set(k,S[k]);openSet(false);$('cam').classList.toggle('on',S.prev&&camOn);models={};if(started)applyListen()};
+$('sTest').onclick=async()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;models={};$('sInfo').textContent='test ediliyor…';try{const r=await ask('Sadece "tamam" de.',[]);$('sInfo').textContent='Çalıştı ('+r.engine+' · '+r.model+'): '+r.text}catch(e){$('sInfo').textContent='Hata: '+e.message}};
+/* ---------- speech out ---------- */
+let voice=null;function pickVoice(){const v=speechSynthesis.getVoices();voice=v.find(x=>/^tr/i.test(x.lang)&&/(google|neural|premium|enhanced)/i.test(x.name))||v.find(x=>/^tr/i.test(x.lang))||null}
+if('speechSynthesis' in window){pickVoice();speechSynthesis.onvoiceschanged=pickVoice}
+function clean(t){return t.replace(/```[\s\S]*?```/g,' ').replace(/[*_#`>~]/g,'').replace(/\[(.*?)\]\(.*?\)/g,'$1').replace(/https?:\/\/\S+/g,'bağlantı').replace(/\s+/g,' ').trim()}
+function say(text){return new Promise(res=>{const t=clean(text);if(!t||!('speechSynthesis' in window)){res();return}
+  speechSynthesis.cancel();stopRec();speaking=true;setState('speak');
+  const parts=t.match(/[^.!?\n]+[.!?]?/g)||[t];let i=0;
+  const done=()=>{speaking=false;setState('idle');res();setTimeout(()=>{if(S.always||awakeUntil>Date.now())listenOnce()},250)};
+  const next=()=>{if(i>=parts.length)return done();const u=new SpeechSynthesisUtterance(parts[i++].trim());u.lang='tr-TR';if(voice)u.voice=voice;u.rate=1.02;u.pitch=.92;u.onend=next;u.onerror=done;speechSynthesis.speak(u)};next()})}
+/* ---------- speech in ---------- */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec=null,recOn=false,awakeUntil=0;
+function stopRec(){if(rec){try{rec.onend=null;rec.abort()}catch(e){}}rec=null;recOn=false}
+function listenOnce(){
+  if(!SR){msg('Bu tarayıcıda ses tanıma yok. Yazarak kullan.');return}
+  if(recOn||speaking)return;
+  rec=new SR();rec.lang='tr-TR';rec.interimResults=true;rec.continuous=false;recOn=true;setState('listen');let fin='';
+  rec.onresult=e=>{let it='';for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)fin+=e.results[i][0].transcript;else it+=e.results[i][0].transcript}if(it)$('state').textContent='“'+it.slice(-30)+'”'};
+  rec.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed')msg('Mikrofon izni verilmedi.')};
+  rec.onend=()=>{recOn=false;rec=null;const t=fin.trim();if(t){handleSpeech(t)}else{setState('idle');if(S.always&&!speaking)setTimeout(listenOnce,400)}};
+  try{rec.start()}catch(e){recOn=false}
+}
+function applyListen(){if(S.always)listenOnce();else stopRec()}
+function handleSpeech(t){
+  const low=t.toLowerCase();const wake=/(jarvis|jarvıs|cervis|çarvis|carvis)/i;
+  if(S.always&&awakeUntil<Date.now()){ if(!wake.test(low)){setState('idle');setTimeout(listenOnce,300);return} t=t.replace(/(hey\s+|hey,?\s*)?(jarvis|jarvıs|cervis|çarvis|carvis)[,.!]?\s*/i,'').trim(); if(!t){wakeUp();return} }
+  awakeUntil=Date.now()+(S.always?0:0);
+  run(t);
+}
+function wakeUp(){awakeUntil=Date.now()+8000;pulse=1;say('Evet, buradayım.')}
+$('bMic').onclick=()=>{if(!started)return;if(speaking){speechSynthesis.cancel();speaking=false}awakeUntil=Date.now()+8000;stopRec();listenOnce()};
+$('bar').onsubmit=e=>{e.preventDefault();const t=$('txt').value.trim();if(!t)return;$('txt').value='';run(t)};
+/* ---------- local skills ---------- */
+const SITES={youtube:'https://www.youtube.com',instagram:'https://www.instagram.com',whatsapp:'https://web.whatsapp.com',spotify:'https://open.spotify.com',gmail:'https://mail.google.com',harita:'https://maps.google.com',maps:'https://maps.google.com',twitter:'https://x.com',netflix:'https://www.netflix.com',github:'https://github.com',telegram:'https://web.telegram.org'};
+function openUrl(u,label){log('s',{html:'<a href="'+u+'" target="_blank" rel="noopener">Aç: '+label+'</a>'});try{const w=window.open(u,'_blank');if(!w)msg('Açılmadıysa yazıdaki bağlantıya dokun.')}catch(e){}}
+function dur(t){const m=t.match(/(\d+)\s*(saniye|sn|dakika|dk|saat)/);if(!m)return 0;const n=+m[1];return n*(/saat/.test(m[2])?3600:/dak|dk/.test(m[2])?60:1)*1000}
+async function local(t){
+  const l=t.toLowerCase().replace(/[’']/g,"'");
+  if(/^(dur|sus|sessiz ol|yeter)\b/.test(l)){speechSynthesis.cancel();speaking=false;setState('idle');return ''}
+  if(/kaç.*saat|saat kaç|saati söyle/.test(l))return 'Saat '+new Date().toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})+'.';
+  if(/bugün.*(gün|tarih)|tarih(i)? söyle|bugün ayın|hangi gün/.test(l))return 'Bugün '+new Date().toLocaleDateString('tr-TR',{day:'numeric',month:'long',year:'numeric',weekday:'long'})+'.';
+  if(/pil|şarj/.test(l)&&navigator.getBattery){const b=await navigator.getBattery();return 'Pil yüzde '+Math.round(b.level*100)+(b.charging?', şarj oluyor.':'.')}
+  if(/hava durumu|hava nasıl/.test(l)){try{const p=await new Promise((a,b)=>navigator.geolocation.getCurrentPosition(a,b,{timeout:8000}));const r=await(await fetch('https://api.open-meteo.com/v1/forecast?latitude='+p.coords.latitude+'&longitude='+p.coords.longitude+'&current=temperature_2m,weather_code,wind_speed_10m&timezone=auto')).json();const c=r.current,w=c.weather_code,d=w==0?'açık':w<4?'parçalı bulutlu':w<50?'sisli':w<70?'yağmurlu':w<80?'karlı':'fırtınalı';return 'Şu an '+Math.round(c.temperature_2m)+' derece, hava '+d+', rüzgar saatte '+Math.round(c.wind_speed_10m)+' kilometre.'}catch(e){return 'Konum izni olmadan hava durumuna bakamıyorum.'}}
+  let m=l.match(/(\d+\s*(saniye|sn|dakika|dk|saat)).*(hatırlat|alarm|sayaç|zamanlayıcı|kur)|(hatırlat|alarm|sayaç|zamanlayıcı).*?(\d+\s*(saniye|sn|dakika|dk|saat))/);
+  if(m){const ms=dur(l);if(ms){const what=l.replace(/\d+\s*(saniye|sn|dakika|dk|saat)( sonra)?/,'').replace(/(bana|hatırlat|alarm|kur|sayaç|zamanlayıcı)/g,'').trim();setTimeout(()=>{say('Hatırlatma. '+(what||'Süre doldu.'));try{navigator.vibrate&&navigator.vibrate([300,150,300])}catch(e){}},ms);return 'Tamam, '+Math.round(ms/60000*10)/10+' dakika sonra haber vereceğim.'}}
+  m=l.match(/^not al[:,]?\s*(.+)/);if(m){const n=store.get('notes',[]);n.push(m[1]);store.set('notes',n);return 'Notu kaydettim.'}
+  if(/notlarım|notları oku/.test(l)){const n=store.get('notes',[]);return n.length?'Notların: '+n.slice(-5).join('. '):'Hiç notun yok.'}
+  if(/notları sil/.test(l)){store.set('notes',[]);return 'Notlar silindi.'}
+  if(/youtube/.test(l)&&/\b(ara|aç|oynat|izle|aratır)/.test(l)){const q=l.replace(/youtube('?\s*(da|de|ta|te))?/,' ').replace(/\b(ara|aç|açar mısın|oynat|izle|aratır mısın|bana|bir)\b/g,' ').replace(/\s+/g,' ').trim();if(q){openUrl('https://www.youtube.com/results?search_query='+encodeURIComponent(q),'YouTube: '+q);return q+' için YouTube açılıyor.'}}
+  m=l.match(/google'?(da|ta)?\s+(.+?)\s*(ara)?$/)||l.match(/(.+?)\s+(ara|araştır)$/);
+  if(m){const q=(m[2]||m[1]).replace(/\s*(ara|araştır)$/,'').trim();if(q&&q.length>1){openUrl('https://www.google.com/search?q='+encodeURIComponent(q),'Google: '+q);return q+' aranıyor.'}}
+  m=l.match(/^(.+?)\s+(aç|açar mısın|açsana)$/);if(m){const k=Object.keys(SITES).find(k=>m[1].includes(k));if(k){openUrl(SITES[k],k);return k+' açılıyor.'}}
+  if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/.test(l))return null;
+  return null;
+}
+/* ---------- LLM ---------- */
+const SYS='Sen JARVIS adlı, Iron Man filmindeki gibi zeki, sakin ve hafif esprili bir sesli asistansın. Kullanıcıyla Türkçe konuş (kullanıcı başka dilde yazarsa o dilde). Cevapların konuşulacağı için kısa ve doğal olsun: genelde 1-3 cümle. Madde işareti, emoji ve markdown kullanma. Bilmediğin şeyi uydurma. Kullanıcıya "efendim" demen gerekmez, samimi ol.';
+let models={};
+async function gList(){if(models.g)return models.g;const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200',{headers:{'x-goog-api-key':S.kG}});if(!r.ok)throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,120));const j=await r.json();
+  const bad=/embedding|imagen|image|tts|live|audio|aqa|veo|robotics|computer|learnlm|gemma|exp|customtools|native|dialog|thinking-\d|latest/i;
+  const c=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/gemini/i.test(m.name)&&!bad.test(m.name));
+  const sc=m=>{const v=parseFloat((m.name.match(/gemini-(\d+(?:\.\d+)?)/)||[])[1]||0),n=m.name;const tier=S.fast?(/lite/.test(n)?5:/flash/.test(n)?30:/pro/.test(n)?10:0):(/pro/.test(n)?30:/lite/.test(n)?5:/flash/.test(n)?20:0);return(S.fast?tier*1000+v*10:v*1000+tier)-(/preview/.test(n)?.5:0)};
+  models.g=c.sort((a,b)=>sc(b)-sc(a)).map(m=>m.name);if(!models.g.length)throw new Error('Gemini modeli bulunamadı');return models.g}
+async function dList(){if(models.d)return models.d;const r=await fetch('https://api.deepseek.com/models',{headers:{Authorization:'Bearer '+S.kD}});if(!r.ok)throw new Error('DeepSeek '+r.status);const j=await r.json();const ids=(j.data||[]).map(m=>m.id);
+  const pref=S.fast?['chat','v3','reasoner']:['reasoner','chat'];models.d=ids.sort((a,b)=>{const f=x=>{const i=pref.findIndex(p=>x.includes(p));return i<0?9:i};return f(a)-f(b)});if(!models.d.length)throw new Error('DeepSeek modeli bulunamadı');return models.d}
+async function viaGemini(text,h,img){const list=await gList();let err;
+  const contents=h.map(x=>({role:x.r==='u'?'user':'model',parts:[{text:x.t}]}));const parts=[{text}];if(img)parts.unshift({inlineData:{mimeType:'image/jpeg',data:img}});contents.push({role:'user',parts});
+  for(const m of list.slice(0,3)){try{const r=await fetch('https://generativelanguage.googleapis.com/v1beta/'+m+':generateContent',{method:'POST',headers:{'x-goog-api-key':S.kG,'content-type':'application/json'},body:JSON.stringify({systemInstruction:{parts:[{text:SYS}]},contents})});if(!r.ok)throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,140));const j=await r.json();const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();if(!t)throw new Error('boş cevap');return{text:t,engine:'Gemini',model:m.replace('models/','')}}catch(e){err=e;if(/ 40[13]/.test(e.message))break}}throw err}
+async function viaDeep(text,h){const list=await dList();let err;const msgs=[{role:'system',content:SYS},...h.map(x=>({role:x.r==='u'?'user':'assistant',content:x.t})),{role:'user',content:text}];
+  for(const m of list.slice(0,2)){try{const r=await fetch('https://api.deepseek.com/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+S.kD,'content-type':'application/json'},body:JSON.stringify({model:m,messages:msgs})});if(!r.ok)throw new Error('DeepSeek '+r.status+': '+(await r.text()).slice(0,140));const j=await r.json();const t=(j.choices?.[0]?.message?.content||'').trim();if(!t)throw new Error('boş cevap');return{text:t,engine:'DeepSeek',model:m}}catch(e){err=e}}throw err}
+async function ask(text,h,img){
+  const order=S.eng==='gemini'?['g']:S.eng==='deepseek'?['d']:['g','d'];let last=null,tried=0;
+  for(const o of order){if(o==='g'&&!S.kG||o==='d'&&!S.kD)continue;tried++;try{return o==='g'?await viaGemini(text,h,img):await viaDeep(text,h)}catch(e){last=e;if(o==='g')models.g=null;else models.d=null}}
+  if(!tried)throw new Error('Anahtar girilmemiş. Sağ üstten "ayar"a dokun.');throw last||new Error('cevap alınamadı');
+}
+/* ---------- main flow ---------- */
+let busy=false;
+async function run(text){
+  if(busy)return;busy=true;log('u','› '+text);setState('think');
+  try{
+    let r=await local(text);
+    if(r===''){busy=false;return}
+    if(r){log('j',r);hist.push({r:'u',t:text},{r:'a',t:r});busy=false;await say(r);return}
+    let img=null;if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&camOn)img=grab();
+    if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&!img)throw new Error('Kamera kapalı.');
+    const a=await ask(text,hist.slice(-12),img);
+    hist.push({r:'u',t:text},{r:'a',t:a.text});log('j',a.text);log('s',a.engine+' · '+a.model);busy=false;await say(a.text);
+  }catch(e){busy=false;setState('idle');log('s','Hata: '+e.message);msg(e.message,6000);if(/CORS|Failed to fetch|NetworkError/i.test(e.message))log('s','Bağlantı engellendi (tarayıcı izin vermiyor olabilir).');if(S.always)setTimeout(listenOnce,600)}
+  busy=false;
+}
+/* ---------- camera + hands ---------- */
+let camOn=false,hl=null,vid=$('vid'),ov=$('ov'),oc=ov.getContext('2d'),prevD=null,apartAt=0,lastClap=0,handsSeen=0;
+function grab(){try{const c=document.createElement('canvas');const w=vid.videoWidth,h=vid.videoHeight,s=Math.min(1,640/Math.max(w,h));c.width=w*s;c.height=h*s;c.getContext('2d').drawImage(vid,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.8).split(',')[1]}catch(e){return null}}
+async function startCam(){
+  try{const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});vid.srcObject=st;await vid.play();camOn=true;$('cam').classList.toggle('on',S.prev);}
+  catch(e){msg('Kamera açılamadı: el hareketi olmadan devam. ('+e.name+')',6000);return}
+  try{
+    const V='0.10.14',m=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@'+V+'/vision_bundle.mjs');
+    const fs=await m.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@'+V+'/wasm');
+    const opt=d=>({baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:d},runningMode:'VIDEO',numHands:2});
+    try{hl=await m.HandLandmarker.createFromOptions(fs,opt('GPU'))}catch(e){hl=await m.HandLandmarker.createFromOptions(fs,opt('CPU'))}
+    log('s','El takibi hazır: ellerini birbirine vur.');loopHands();
+  }catch(e){msg('El takibi yüklenemedi (internet?). Ses ve yazı çalışır.',6000);log('s','El takibi yok: '+e.message)}
+}
+let lastT=-1;
+function loopHands(){
+  requestAnimationFrame(loopHands);if(!hl||vid.readyState<2||vid.currentTime===lastT)return;lastT=vid.currentTime;
+  let res;try{res=hl.detectForVideo(vid,performance.now())}catch(e){return}
+  const W=ov.width=vid.videoWidth||160,H=ov.height=vid.videoHeight||120;oc.clearRect(0,0,W,H);
+  const hs=res.landmarks||[];oc.fillStyle='#7fb0ff';
+  for(const h of hs)for(const p of h){oc.beginPath();oc.arc(p.x*W,p.y*H,3,0,TAU);oc.fill()}
+  const pc=h=>{let x=0,y=0;for(const i of[0,5,9,13,17]){x+=h[i].x;y+=h[i].y}return{x:x/5,y:y/5}};
+  const now=performance.now();
+  if(hs.length>=1)lastHand=now;
+  if(hs.length===2){
+    const a=pc(hs[0]),b=pc(hs[1]),d=Math.hypot(a.x-b.x,(a.y-b.y)*.75);
+    if(d>.3)apartAt=now;
+    if(d<.14&&now-apartAt<700&&now-lastClap>2200){lastClap=now;clap()}
+    else if(d>.18){zoomT=clamp(.55+d*1.7,.7,1.9)}
+  }else if(hs.length===1){const a=pc(hs[0]);rotT=(.5-a.x)*5}
+  else{zoomT+=(1-zoomT)*.02;rotT*=.98}
+}
+function clap(){if(!started||busy)return;log('s','👏 el çırpma algılandı');if(speaking){speechSynthesis.cancel();speaking=false}pulse=1.4;awakeUntil=Date.now()+8000;try{navigator.vibrate&&navigator.vibrate(60)}catch(e){}
+  if(!hist.length&&!S.kG&&!S.kD)say('Merhaba. Başlamak için ayarlardan anahtarını gir.');else{stopRec();say('Seni dinliyorum.')}}
+/* ---------- orb ---------- */
+const cv=$('orb'),g=cv.getContext('2d');let W=0,H=0,DPR=1,pulse=0,t0=performance.now();
+function rs(){DPR=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR}rs();addEventListener('resize',rs);
+const COL={idle:[77,139,255],listen:[90,230,255],think:[255,170,60],speak:[255,60,60]};let cur=[77,139,255];
+const dots=Array.from({length:70},()=>({a:Math.random()*TAU,r:.55+Math.random()*.75,s:(Math.random()-.5)*.5,z:Math.random()}));
+function orb(now){
+  requestAnimationFrame(orb);const t=(now-t0)/1000;const tc=COL[state]||COL.idle;for(let i=0;i<3;i++)cur[i]+=(tc[i]-cur[i])*.08;
+  rot+=(rotT-rot)*.08;zoom+=(zoomT-zoom)*.08;pulse*=.94;
+  const target=state==='speak'?.5+.5*Math.sin(t*14)*Math.sin(t*5.3)+.2:state==='listen'?.35+.2*Math.sin(t*3):.08;lvl+=(target-lvl)*.15;
+  g.setTransform(DPR,0,0,DPR,0,0);g.fillStyle='rgba(4,6,11,.28)';g.fillRect(0,0,W,H);
+  const cx=W/2,cy=H*.4,R=Math.min(W,H)*.26*zoom*(1+pulse*.15+lvl*.06),c=`${cur[0]|0},${cur[1]|0},${cur[2]|0}`;
+  g.globalCompositeOperation='lighter';
+  const gr=g.createRadialGradient(cx,cy,R*.1,cx,cy,R*1.9);gr.addColorStop(0,`rgba(${c},${.22+lvl*.25})`);gr.addColorStop(1,`rgba(${c},0)`);g.fillStyle=gr;g.fillRect(0,0,W,H);
+  for(let k=0;k<5;k++){g.save();g.translate(cx,cy);g.rotate(t*(.15+k*.07)*(k%2?-1:1)+rot*(k+1)*.4);g.scale(1,.35+k*.13+Math.sin(t*.5+k)*.03);
+    g.strokeStyle=`rgba(${c},${.55-k*.07})`;g.lineWidth=1.4+(k===0?1:0);g.setLineDash(k%2?[2,7]:[R*.4,R*.12,4,R*.1]);g.beginPath();g.arc(0,0,R*(.62+k*.17)+lvl*8*(k+1)*.3,0,TAU);g.stroke();g.restore()}
+  g.setLineDash([]);
+  g.strokeStyle=`rgba(${c},.9)`;g.lineWidth=2;g.beginPath();g.arc(cx,cy,R*.5+lvl*10,0,TAU);g.stroke();
+  const ig=g.createRadialGradient(cx,cy,0,cx,cy,R*.5);ig.addColorStop(0,`rgba(255,255,255,${.5+lvl*.4})`);ig.addColorStop(.4,`rgba(${c},.45)`);ig.addColorStop(1,`rgba(${c},0)`);g.fillStyle=ig;g.beginPath();g.arc(cx,cy,R*.5+lvl*10,0,TAU);g.fill();
+  for(const d of dots){d.a+=d.s*.01+rot*.004;const r=R*d.r*(1+lvl*.08),x=cx+Math.cos(d.a)*r,y=cy+Math.sin(d.a)*r*.78;g.fillStyle=`rgba(${c},${.3+d.z*.6})`;g.fillRect(x,y,1.5+d.z*2,1.5+d.z*2)}
+  if(state==='speak'||state==='listen'){const n=48;g.strokeStyle=`rgba(${c},.9)`;g.lineWidth=2;g.lineCap='round';for(let i=0;i<n;i++){const a=i/n*TAU,h=(state==='speak'?6+lvl*26*Math.abs(Math.sin(i*1.7+t*9)):4+lvl*10*Math.abs(Math.sin(i*1.3+t*4))),r0=R*.5+lvl*10+6;g.beginPath();g.moveTo(cx+Math.cos(a)*r0,cy+Math.sin(a)*r0);g.lineTo(cx+Math.cos(a)*(r0+h),cy+Math.sin(a)*(r0+h));g.stroke()}}
+  g.globalCompositeOperation='source-over';
+}
+requestAnimationFrame(orb);
+cv.addEventListener('pointerdown',()=>{if(started)$('bMic').click()});
+/* ---------- start ---------- */
+$('go').onclick=async()=>{
+  $('start').style.display='none';started=true;setState('idle');
+  try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}catch(e){}
+  log('s','JARVIS çevrimiçi.');if(!S.kG&&!S.kD){log('s','Önce sağ üstten "ayar" → anahtarlarını gir.')}
+  await startCam();applyListen();
+  say('Merhaba. Sistemler hazır.');
+};
+if(!SR)$('bMic').style.display='none';
+</script>
+</body>
+</html>
