@@ -64,6 +64,7 @@ body.holo #log,body.holo #log+*{transition:.4s}body.holo #log{opacity:0;pointer-
 <small id="sInfo"></small>
 </div>
 <script type="module">
+const CAP=window.Capacitor,NATIVE=!!(CAP&&CAP.isNativePlatform&&CAP.isNativePlatform()),PL=n=>CAP&&CAP.Plugins&&CAP.Plugins[n];
 const $=id=>document.getElementById(id),clamp=(v,a,b)=>v<a?a:v>b?b:v,TAU=Math.PI*2;
 const store={get(k,d){try{const v=localStorage.getItem('jv_'+k);return v===null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('jv_'+k,JSON.stringify(v))}catch(e){}}};
 const S={kG:store.get('kG',''),kD:store.get('kD',''),eng:store.get('eng','auto'),fast:store.get('fast2',true),vo:store.get('vo','phone'),vn:store.get('vn','Kore'),always:store.get('always',false),prev:store.get('prev',true)};
@@ -102,8 +103,12 @@ async function say(text){
     const next=()=>{if(i>=parts.length)return done();const u=new SpeechSynthesisUtterance(parts[i++].trim());u.lang='tr-TR';if(voice)u.voice=voice;u.rate=1.02;u.pitch=.92;u.onend=next;u.onerror=done;speechSynthesis.speak(u)};next()})}
 /* ---------- speech in ---------- */
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec=null,recOn=false,awakeUntil=0;
-function stopRec(){if(rec){try{rec.onend=null;rec.abort()}catch(e){}}rec=null;recOn=false}
+function stopRec(){if(NATIVE&&recOn&&PL('SpeechRecognition')){try{PL('SpeechRecognition').stop()}catch(e){}}if(rec){try{rec.onend=null;rec.abort()}catch(e){}}rec=null;recOn=false}
+async function listenNative(){const SN=PL('SpeechRecognition');if(recOn||speaking)return;recOn=true;setState('listen');let t='';
+  try{const r=await SN.start({language:'tr-TR',maxResults:1,partialResults:false,popup:false});t=((r&&r.matches&&r.matches[0])||'').trim()}catch(e){if(/permission|izin/i.test(String(e&&e.message||e))){msg('Mikrofon izni verilmedi.');conv=false;setConv()}}
+  recOn=false;if(t)handleSpeech(t);else{setState('idle');if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}}
 function listenOnce(){
+  if(NATIVE&&PL('SpeechRecognition'))return listenNative();
   if(!SR){msg('Bu tarayıcıda ses tanıma yok. Yazarak kullan.');return}
   if(recOn||speaking)return;
   rec=new SR();rec.lang='tr-TR';rec.interimResults=true;rec.continuous=false;recOn=true;setState('listen');let fin='';
@@ -125,7 +130,10 @@ $('bMic').onclick=()=>{if(!started)return;if(conv){conv=false;stopRec();stopSpee
 $('bar').onsubmit=e=>{e.preventDefault();const t=$('txt').value.trim();if(!t)return;$('txt').value='';run(t)};
 /* ---------- local skills ---------- */
 const SITES={youtube:'https://www.youtube.com',instagram:'https://www.instagram.com',whatsapp:'https://web.whatsapp.com',spotify:'https://open.spotify.com',gmail:'https://mail.google.com',harita:'https://maps.google.com',maps:'https://maps.google.com',twitter:'https://x.com',netflix:'https://www.netflix.com',github:'https://github.com',telegram:'https://web.telegram.org'};
-function openUrl(u,label){log('s',{html:'<a href="'+u+'" target="_blank" rel="noopener">Aç: '+label+'</a>'});try{const w=window.open(u,'_blank');if(!w)msg('Açılmadıysa yazıdaki bağlantıya dokun.')}catch(e){}}
+const APPS={whatsapp:'whatsapp://',youtube:'vnd.youtube://',instagram:'instagram://',spotify:'spotify://',telegram:'tg://',gmail:'googlegmail://',harita:'geo:0,0?q=',maps:'geo:0,0?q=',twitter:'twitter://',netflix:'nflx://'};
+async function openApp(k){if(NATIVE&&PL('AppLauncher')&&APPS[k]){try{await PL('AppLauncher').openUrl({url:APPS[k]});return true}catch(e){}}openUrl(SITES[k],k);return false}
+function openUrl(u,label){if(NATIVE&&PL('Browser')){try{PL('Browser').open({url:u});return}catch(e){}}
+  log('s',{html:'<a href="'+u+'" target="_blank" rel="noopener">Aç: '+label+'</a>'});try{const w=window.open(u,'_blank');if(!w)msg('Açılmadıysa yazıdaki bağlantıya dokun.')}catch(e){}}
 function dur(t){const m=t.match(/(\d+)\s*(saniye|sn|dakika|dk|saat)/);if(!m)return 0;const n=+m[1];return n*(/saat/.test(m[2])?3600:/dak|dk/.test(m[2])?60:1)*1000}
 async function local(t){
   const l=t.toLowerCase().replace(/[’']/g,"'");
@@ -134,7 +142,7 @@ async function local(t){
   if(holoT>0){const HC=holoCmd(l);if(HC!==null)return HC}
   if(/(hologram|ekrandan|ekrana).*(kapat|gizle|kaldır)|^(kapat|gizle)$|yansıtmayı (kapat|durdur)/.test(l)){holoT=0;return 'Hologramı kapattım.'}
   { const hk=holoKey(l); if(hk&&/yansıt|göster|hologram|incele|aç|getir|tara|ekrana/.test(l)){holoName=hk;holoT=1;exT=0;return HOLO_SAY[hk]} }
-  if(/yansıt|ekrana getir|ekranda göster/.test(l)){const k=Object.keys(SITES).find(k=>l.includes(k));if(k){openUrl(SITES[k],k);return k+' sayfaya gömülemiyor, yansıtamadım. Yeni sekmede açtım.'}return 'Bunu ekrana yansıtamıyorum. Yansıtabildiklerim: zırh, kask, DNA, küre ve küp.'}
+  if(/yansıt|ekrana getir|ekranda göster/.test(l)){const k=Object.keys(SITES).find(k=>l.includes(k));if(k){if(NATIVE){await openApp(k);return k+' açıldı.'}openUrl(SITES[k],k);return k+' sayfaya gömülemiyor, yansıtamadım. Yeni sekmede açtım.'}return 'Bunu ekrana yansıtamıyorum. Yansıtabildiklerim: zırh, kask, DNA, küre ve küp.'}
   if(/kaç.*saat|saat kaç|saati söyle/.test(l))return 'Saat '+new Date().toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})+'.';
   if(/bugün.*(gün|tarih)|tarih(i)? söyle|bugün ayın|hangi gün/.test(l))return 'Bugün '+new Date().toLocaleDateString('tr-TR',{day:'numeric',month:'long',year:'numeric',weekday:'long'})+'.';
   if(/pil|şarj/.test(l)&&navigator.getBattery){const b=await navigator.getBattery();return 'Pil yüzde '+Math.round(b.level*100)+(b.charging?', şarj oluyor.':'.')}
@@ -147,7 +155,7 @@ async function local(t){
   if(/youtube/.test(l)&&/\b(ara|aç|oynat|izle|aratır)/.test(l)){const q=l.replace(/youtube('?\s*(da|de|ta|te))?/,' ').replace(/\b(ara|aç|açar mısın|oynat|izle|aratır mısın|bana|bir)\b/g,' ').replace(/\s+/g,' ').trim();if(q){openUrl('https://www.youtube.com/results?search_query='+encodeURIComponent(q),'YouTube: '+q);return q+' için YouTube açılıyor.'}}
   m=l.match(/google'?(da|ta)?\s+(.+?)\s*(ara)?$/)||l.match(/(.+?)\s+(ara|araştır)$/);
   if(m){const q=(m[2]||m[1]).replace(/\s*(ara|araştır)$/,'').trim();if(q&&q.length>1){openUrl('https://www.google.com/search?q='+encodeURIComponent(q),'Google: '+q);return q+' aranıyor.'}}
-  m=l.match(/^(.+?)\s+(aç|açar mısın|açsana)$/);if(m){const k=Object.keys(SITES).find(k=>m[1].includes(k));if(k){openUrl(SITES[k],k);return k+' açılıyor.'}}
+  m=l.match(/^(.+?)\s+(aç|açar mısın|açsana)$/);if(m){const k=Object.keys(SITES).find(k=>m[1].includes(k));if(k){if(NATIVE){await openApp(k);return k+' açılıyor.'}openUrl(SITES[k],k);return k+' açılıyor.'}}
   if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/.test(l))return null;
   return null;
 }
@@ -410,10 +418,11 @@ $('go').onclick=async()=>{
   $('start').style.display='none';started=true;setState('idle');
   try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}catch(e){}
   log('s','JARVIS çevrimiçi.');if(!S.kG&&!S.kD){log('s','Önce sağ üstten "ayar" → anahtarlarını gir.')}
-  try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}await startCam();applyListen();
+  try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}if(NATIVE&&PL('SpeechRecognition')){try{await PL('SpeechRecognition').requestPermissions()}catch(e){}}
+  await startCam();applyListen();
   say('Merhaba. Sistemler hazır.');
 };
-if(!SR)$('bMic').style.display='none';
+if(!SR&&!NATIVE)$('bMic').style.display='none';
 window.__jv={feed(h,t){procHands(h,t)},get st(){return{conv,exT,yawT,zoomT,pitchT,holoT,glabel}},holo(v){holoName='armor';holoT=v;holoA=v;exT=0}};
 </script>
 </body>

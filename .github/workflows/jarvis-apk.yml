@@ -1,0 +1,76 @@
+name: Jarvis APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['jarvis/**', 'jarvis-app/**', '.github/workflows/jarvis-apk.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Paketleri kur
+        working-directory: jarvis-app
+        run: npm install
+
+      - name: Web dosyalarini hazirla
+        working-directory: jarvis-app
+        run: |
+          mkdir -p www
+          cp ../jarvis/index.html www/index.html
+
+      - name: Android projesi
+        working-directory: jarvis-app
+        run: |
+          npx cap add android
+          npx cap sync android
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#<activity#<activity android:screenOrientation="portrait"#' $M
+          sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA"/><uses-permission android:name="android.permission.RECORD_AUDIO"/><uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/><uses-permission android:name="android.permission.VIBRATE"/><uses-feature android:name="android.hardware.camera" android:required="false"/><application#' $M
+          grep -n "uses-permission\|screenOrientation" $M
+
+      - name: Surum ve sabit imza
+        working-directory: jarvis-app
+        run: |
+          python3 - <<'PY'
+          import re
+          p='android/app/build.gradle'
+          s=open(p).read()
+          s=re.sub(r'versionCode\s+\d+','versionCode ${{ github.run_number }}',s)
+          s=re.sub(r'versionName\s+"[^"]*"','versionName "1.0.${{ github.run_number }}"',s)
+          assert 'buildTypes {' in s
+          s=s.replace('buildTypes {',"signingConfigs {\n        debug {\n            storeFile file('../../test.keystore')\n            storePassword 'jarvis123'\n            keyAlias 'jarvis'\n            keyPassword 'jarvis123'\n        }\n    }\n    buildTypes {",1)
+          open(p,'w').write(s)
+          PY
+
+      - name: APK derle
+        working-directory: jarvis-app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../../jarvis.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-apk
+          path: jarvis.apk
+
+      - name: Surum olarak yayinla (telefondan kolay indirme)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete jarvis-latest --yes --cleanup-tag || true
+          gh release create jarvis-latest jarvis.apk --title "Jarvis son surum" --notes "Test APK. Telefondan indirip kur." --target ${{ github.sha }}

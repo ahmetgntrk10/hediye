@@ -1,0 +1,7 @@
+{
+  "appId": "com.tapverse.jarvis",
+  "appName": "JARVIS",
+  "webDir": "www",
+  "server": { "androidScheme": "https" },
+  "backgroundColor": "#04060b"
+}
