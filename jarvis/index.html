@@ -157,11 +157,11 @@ let rawG=null;async function gAll(){if(rawG)return rawG;const r=await tfetch('ht
 async function gList(){if(models.g)return models.g;const all=await gAll();const j={models:all};
   const bad=/embedding|imagen|image|tts|live|audio|aqa|veo|robotics|computer|learnlm|gemma|exp|customtools|native|dialog|thinking-\d|latest/i;
   const c=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/gemini/i.test(m.name)&&!bad.test(m.name));
-  const sc=m=>{const v=parseFloat((m.name.match(/gemini-(\d+(?:\.\d+)?)/)||[])[1]||0),n=m.name;const tier=S.fast?(/lite/.test(n)?5:/flash/.test(n)?30:/pro/.test(n)?10:0):(/pro/.test(n)?30:/lite/.test(n)?5:/flash/.test(n)?20:0);return(S.fast?tier*1000+v*10:v*1000+tier)-(/preview/.test(n)?.5:0)};
+  const sc=m=>{const v=parseFloat((m.name.match(/gemini-(\d+(?:\.\d+)?)/)||[])[1]||0),n=m.name;const tier=S.fast?(/lite/.test(n)?5:/flash/.test(n)?30:/pro/.test(n)?10:0):(/pro/.test(n)?30:/lite/.test(n)?5:/flash/.test(n)?20:0);return(S.fast?tier*1000+v*10:v*1000+tier)-(/preview/.test(n)?100000:0)};
   models.g=c.sort((a,b)=>sc(b)-sc(a)).map(m=>m.name);if(!models.g.length)throw new Error('Gemini modeli bulunamadı');return models.g}
 async function dList(){if(models.d)return models.d;const r=await tfetch('https://api.deepseek.com/models',{headers:{Authorization:'Bearer '+S.kD}});if(!r.ok)throw new Error('DeepSeek '+r.status);const j=await r.json();const ids=(j.data||[]).map(m=>m.id);
   const pref=S.fast?['chat','v3','reasoner']:['reasoner','chat'];models.d=ids.sort((a,b)=>{const f=x=>{const i=pref.findIndex(p=>x.includes(p));return i<0?9:i};return f(a)-f(b)});if(!models.d.length)throw new Error('DeepSeek modeli bulunamadı');return models.d}
-async function viaGemini(text,h,img,web){const list=await gList();let err;
+async function viaGemini(text,h,img,web){const list=await gList();let err;const T0=Date.now(),LIM=S.fast?28000:60000;
   const contents=h.map(x=>({role:x.r==='u'?'user':'model',parts:[{text:x.t}]}));const parts=[{text}];if(img)parts.unshift({inlineData:{mimeType:'image/jpeg',data:img}});contents.push({role:'user',parts});
   for(const m of list.slice(0,4)){
     const variants=[];const pro=/pro/.test(m);
@@ -169,7 +169,7 @@ async function viaGemini(text,h,img,web){const list=await gList();let err;
     if(web){if(!pro&&S.fast)variants.push({...base,...nt,tools:[{google_search:{}}]});variants.push({...base,tools:[{google_search:{}}]})}
     if(!pro&&S.fast)variants.push({...base,...nt});
     variants.push(base);
-    for(const body of variants){try{const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/'+m+':generateContent',{method:'POST',headers:{'x-goog-api-key':S.kG,'content-type':'application/json'},body:JSON.stringify(body)},S.fast?16000:40000);if(!r.ok)throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,140));const j=await r.json();const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();if(!t)throw new Error('boş cevap');return{text:t,engine:'Gemini'+(body.tools?' + web':''),model:m.replace('models/','')}}catch(e){err=e;if(!/ 400/.test(e.message))break}}
+    for(const body of variants){const left=LIM-(Date.now()-T0);if(left<2500){throw err||new Error('zaman aşımı')}try{log('s','deniyorum: '+m.replace('models/','')+(body.tools?' + web':''));const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/'+m+':generateContent',{method:'POST',headers:{'x-goog-api-key':S.kG,'content-type':'application/json'},body:JSON.stringify(body)},Math.min(S.fast?10000:30000,left));if(!r.ok)throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,140));const j=await r.json();const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();if(!t)throw new Error('boş cevap');return{text:t,engine:'Gemini'+(body.tools?' + web':''),model:m.replace('models/','')}}catch(e){err=e;log('s','  → '+e.message.slice(0,90));if(!/ 400/.test(e.message))break}}
     if(/ 40[13]/.test(err.message)&&!/quota|limit|exhaust/i.test(err.message))break}
   throw err}
 async function viaDeep(text,h){const list=await dList();let err;const msgs=[{role:'system',content:SYS},...h.map(x=>({role:x.r==='u'?'user':'assistant',content:x.t})),{role:'user',content:text}];
