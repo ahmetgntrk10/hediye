@@ -338,7 +338,7 @@ function draw(){
   bk.forEach(a=>a.length=0);
   const hu0=0;
   for(let i=0;i<N;i++){
-    const p=P[i];if(p.a<.03)continue;
+    const p=P[i];if(p.a<.03||(p.txt&&p.kind===0))continue;
     let x=p.x*br,y=p.y*br,z=p.z*br;
     const x1=x*ct+z*st,z1=-x*st+z*ct,y1=y*cv2-z1*sv,z2=y*sv+z1*cv2,ps=1400/(1400-z2);
     const X=cx+x1*K*ps,Y=cy+y1*K*ps;
@@ -375,15 +375,25 @@ function draw(){
   ctx.setTransform(DPR,0,0,DPR,0,0);
   const vg=ctx.createRadialGradient(cx,H*.46,Math.min(W,H)*.3,cx,H*.46,Math.max(W,H)*.78);vg.addColorStop(0,'rgba(5,5,8,0)');vg.addColorStop(1,'rgba(5,5,8,.78)');ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
   ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle=ctx.createPattern(scan,'repeat');ctx.globalAlpha=.55;ctx.fillRect(0,0,cv.width,cv.height);ctx.globalAlpha=1;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  {
+    const la=phase===PH.ENV?clamp((pt-1.3)/1.0,0,1):phase===PH.OPEN?1-ease(clamp(pt/.6,0,1)):0;
+    if(la>.01){
+      const sh=shapes.env,Y=cy+(.868-.5)*sh.Hw*K,fs=Math.round(clamp(sh.Ww*K*.15,26,64)),lab=('FOR '+(cfg.to||'YOU')).toUpperCase().split('').join(String.fromCharCode(8202,8202));
+      ctx.font=`800 ${fs}px ${MONO}`;ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.globalAlpha=la;ctx.shadowColor='rgba(255,150,60,.9)';ctx.shadowBlur=22;ctx.fillStyle='#fff';ctx.fillText(lab,cx+mx*6,Y);
+      ctx.shadowBlur=0;ctx.fillText(lab,cx+mx*6,Y);ctx.globalAlpha=1;
+    }
+  }
   // message
   ctx.setTransform(DPR,0,0,DPR,0,0);
   if(typeT>=0&&msgText){
-    const fs=isMobile?13:15,max=Math.min(W*.82,520);ctx.font=`500 ${fs}px ${MONO}`;ctx.textAlign='center';ctx.textBaseline='top';
+    const fs=isMobile?17:21,max=Math.min(W*.86,640);ctx.font=`600 ${fs}px ${MONO}`;ctx.textAlign='center';ctx.textBaseline='top';
     const n=Math.floor(typeT*30-6),shown=msgText.slice(0,clamp(n,0,msgText.length));
     const words=msgText.split(' '),lines=[];let cur='';for(const w of words){const t=cur?cur+' '+w:w;if(ctx.measureText(t).width>max&&cur){lines.push(cur);cur=w}else cur=t}lines.push(cur);
-    let used=0,y=H*.805;const lh=fs*1.65;
-    lines.forEach((ln,i)=>{const take=clamp(shown.length-used,0,ln.length);const s=ln.slice(0,take);used+=ln.length+1;ctx.fillStyle='rgba(225,230,245,.86)';ctx.shadowColor='rgba(255,138,0,.5)';ctx.shadowBlur=8;ctx.fillText(s,W/2,y+i*lh);ctx.shadowBlur=0});
-    if(n>=msgText.length&&cfg.from){ctx.font=`500 ${fs-2}px ${MONO}`;ctx.fillStyle=`rgba(255,160,90,${clamp((n-msgText.length)/30,0,.8)})`;ctx.fillText(T.sig+cfg.from,W/2,y+lines.length*lh+6)}
+    let used=0,y=H*.79;const lh=fs*1.6;{const bh=lines.length*lh+(cfg.from?fs*2:fs*.6),g=ctx.createLinearGradient(0,y-fs,0,y+bh+fs);g.addColorStop(0,'rgba(5,5,8,0)');g.addColorStop(.25,'rgba(5,5,8,.8)');g.addColorStop(.8,'rgba(5,5,8,.8)');g.addColorStop(1,'rgba(5,5,8,0)');ctx.fillStyle=g;ctx.fillRect(0,y-fs,W,bh+fs*2)}
+    lines.forEach((ln,i)=>{const take=clamp(shown.length-used,0,ln.length);const s=ln.slice(0,take);used+=ln.length+1;ctx.fillStyle='#fff';ctx.shadowColor='rgba(0,0,0,.9)';ctx.shadowBlur=10;ctx.fillText(s,W/2,y+i*lh);ctx.shadowBlur=0});
+    if(n>=msgText.length&&cfg.from){ctx.font=`600 ${fs-3}px ${MONO}`;ctx.fillStyle=`rgba(255,170,100,${clamp((n-msgText.length)/30,0,.8)})`;ctx.fillText(T.sig+cfg.from,W/2,y+lines.length*lh+6)}
     else if(false){}
   }
 }
