@@ -42,6 +42,133 @@ jobs:
           sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA"/><uses-permission android:name="android.permission.RECORD_AUDIO"/><uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/><uses-permission android:name="android.permission.VIBRATE"/><uses-feature android:name="android.hardware.camera" android:required="false"/><application#' $M
           grep -n "uses-permission\|screenOrientation" $M
 
+      - name: Ozel eklenti (sayfa yansitma + bip sesini kapatma)
+        working-directory: jarvis-app
+        run: |
+          D=android/app/src/main/java/com/tapverse/jarvis
+          mkdir -p $D
+          cat > $D/MainActivity.java <<'JAVA'
+          package com.tapverse.jarvis;
+          import android.os.Bundle;
+          import com.getcapacitor.BridgeActivity;
+          public class MainActivity extends BridgeActivity {
+            @Override
+            public void onCreate(Bundle b) {
+              registerPlugin(JarvisViewPlugin.class);
+              super.onCreate(b);
+            }
+          }
+          JAVA
+          cat > $D/JarvisViewPlugin.java <<'JAVA'
+          package com.tapverse.jarvis;
+          import android.content.Context;
+          import android.graphics.Color;
+          import android.media.AudioManager;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.view.ViewGroup;
+          import android.webkit.CookieManager;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.FrameLayout;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+          import java.util.ArrayList;
+          @CapacitorPlugin(name = "JarvisView")
+          public class JarvisViewPlugin extends Plugin {
+            private WebView wv;
+            private ArrayList<Integer> muted = new ArrayList<>();
+            @PluginMethod
+            public void open(final PluginCall call) {
+              final String url = call.getString("url");
+              final int top = call.getInt("top", 0);
+              final int bottom = call.getInt("bottom", 0);
+              final boolean desktop = call.getBoolean("desktop", false);
+              getActivity().runOnUiThread(new Runnable() {
+                public void run() {
+                  try {
+                    close0();
+                    FrameLayout root = (FrameLayout) getActivity().findViewById(android.R.id.content);
+                    float d = getActivity().getResources().getDisplayMetrics().density;
+                    wv = new WebView(getContext());
+                    WebSettings s = wv.getSettings();
+                    s.setJavaScriptEnabled(true);
+                    s.setDomStorageEnabled(true);
+                    s.setMediaPlaybackRequiresUserGesture(false);
+                    if (desktop) {
+                      s.setUserAgentString("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+                      s.setUseWideViewPort(true);
+                      s.setLoadWithOverviewMode(true);
+                      s.setSupportZoom(true);
+                      s.setBuiltInZoomControls(true);
+                      s.setDisplayZoomControls(false);
+                    }
+                    CookieManager.getInstance().setAcceptCookie(true);
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true);
+                    wv.setWebViewClient(new WebViewClient());
+                    wv.setWebChromeClient(new WebChromeClient());
+                    wv.setBackgroundColor(Color.BLACK);
+                    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-1, -1);
+                    lp.topMargin = (int) (top * d);
+                    lp.bottomMargin = (int) (bottom * d);
+                    wv.setLayoutParams(lp);
+                    root.addView(wv);
+                    wv.loadUrl(url);
+                    call.resolve();
+                  } catch (Exception e) {
+                    call.reject(String.valueOf(e.getMessage()));
+                  }
+                }
+              });
+            }
+            @PluginMethod
+            public void close(final PluginCall call) {
+              getActivity().runOnUiThread(new Runnable() {
+                public void run() {
+                  close0();
+                  call.resolve();
+                }
+              });
+            }
+            private void close0() {
+              if (wv != null) {
+                ViewGroup p = (ViewGroup) wv.getParent();
+                if (p != null) p.removeView(wv);
+                wv.destroy();
+                wv = null;
+              }
+            }
+            @PluginMethod
+            public void mute(PluginCall call) {
+              int ms = call.getInt("ms", 1100);
+              final AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+              int[] st = { AudioManager.STREAM_SYSTEM, AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_MUSIC };
+              for (int s : st) {
+                try {
+                  if (!am.isStreamMute(s) && !muted.contains(s)) {
+                    am.adjustStreamVolume(s, AudioManager.ADJUST_MUTE, 0);
+                    muted.add(s);
+                  }
+                } catch (Exception e) {}
+              }
+              new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                public void run() {
+                  for (int s : muted) {
+                    try { am.adjustStreamVolume(s, AudioManager.ADJUST_UNMUTE, 0); } catch (Exception e) {}
+                  }
+                  muted.clear();
+                }
+              }, ms);
+              call.resolve();
+            }
+          }
+          JAVA
+          sed -i 's/^          //' $D/MainActivity.java $D/JarvisViewPlugin.java
+
       - name: Surum ve sabit imza
         working-directory: jarvis-app
         run: |

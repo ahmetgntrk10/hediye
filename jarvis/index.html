@@ -44,7 +44,7 @@ body.holo #log,body.holo #log+*{transition:.4s}body.holo #log{opacity:0;pointer-
 <body>
 <canvas id="orb"></canvas>
 <div id="cam"><video id="vid" playsinline muted></video><canvas id="ov"></canvas></div>
-<div id="top"><span id="state">hazır değil</span><span style="display:flex;gap:6px"><button class="btn" id="bMic">dinle</button><button class="btn" id="bSet">ayar</button></span></div>
+<div id="top"><span id="state">hazır değil</span><span style="display:flex;gap:6px"><button class="btn" id="bClose" style="display:none">kapat ✕</button><button class="btn" id="bMic">dinle</button><button class="btn" id="bSet">ayar</button></span></div>
 <div id="msg"></div>
 <div id="log"></div>
 <form id="bar"><input id="txt" placeholder="Yaz veya &quot;Jarvis&quot; de…" autocomplete="off"><button class="btn" type="submit">gönder</button></form>
@@ -57,25 +57,26 @@ body.holo #log,body.holo #log+*{transition:.4s}body.holo #log{opacity:0;pointer-
 <label>Ses</label><select id="vo"><option value="phone">Telefon sesi</option><option value="gemini">Gemini sesi (ücretsiz anahtarla)</option></select>
 <label>Gemini ses tonu</label><select id="vn"><option>Kore</option><option>Puck</option><option>Charon</option><option>Fenrir</option><option>Aoede</option><option>Zephyr</option><option>Orus</option><option>Leda</option><option>Algenib</option><option>Sadaltager</option></select>
 <div class="sw"><span>Hızlı mod (önerilen; kapalıysa pro model, çok yavaş)</span><input type="checkbox" id="fast"></div>
-<div class="sw"><span>Hep dinle ("Jarvis" diye seslen)</span><input type="checkbox" id="always"></div>
+<div class="sw"><span>Hep sessizce dinle ("Jarvis" deyince cevaplar)</span><input type="checkbox" id="always"></div>
+<div class="sw"><span>Her konuşmama cevap ver (Jarvis demeden)</span><input type="checkbox" id="all"></div>
 <div class="sw"><span>Kamera önizleme</span><input type="checkbox" id="prev" checked></div>
 <small>Hızlı mod açıkken hızlı Gemini modeli seçilir ve düşünme kapatılır; cevaplar birkaç saniyede gelir. Haber, fiyat gibi güncel sorularda Gemini otomatik Google'da arar.</small><small>Anahtarlar sadece bu telefonun tarayıcısında saklanır. Model adı yazmana gerek yok, en iyi mevcut model otomatik seçilir.</small>
 <div style="display:flex;gap:8px;margin-top:14px"><button class="btn" id="sTest" style="flex:1">test et</button><button class="btn on" id="sSave" style="flex:1">kaydet</button></div>
 <small id="sInfo"></small>
 </div>
 <script type="module">
-const CAP=window.Capacitor,NATIVE=!!(CAP&&CAP.isNativePlatform&&CAP.isNativePlatform()),PL=n=>CAP&&CAP.Plugins&&CAP.Plugins[n];
+const CAP=window.Capacitor,NATIVE=!!(CAP&&CAP.isNativePlatform&&CAP.isNativePlatform()),PL=n=>{try{return(CAP.Plugins&&CAP.Plugins[n])||(CAP.registerPlugin&&CAP.registerPlugin(n))||null}catch(e){return null}};
 const $=id=>document.getElementById(id),clamp=(v,a,b)=>v<a?a:v>b?b:v,TAU=Math.PI*2;
 const store={get(k,d){try{const v=localStorage.getItem('jv_'+k);return v===null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('jv_'+k,JSON.stringify(v))}catch(e){}}};
-const S={kG:store.get('kG',''),kD:store.get('kD',''),eng:store.get('eng','auto'),fast:store.get('fast2',true),vo:store.get('vo','phone'),vn:store.get('vn','Kore'),always:store.get('always',false),prev:store.get('prev',true)};
+const S={kG:store.get('kG',''),kD:store.get('kD',''),eng:store.get('eng','auto'),fast:store.get('fast2',true),vo:store.get('vo','phone'),vn:store.get('vn','Kore'),always:store.get('always2',NATIVE),all:store.get('all',false),prev:store.get('prev',true)};
 let conv=false,state='idle',started=false,speaking=false,awake=false,hist=[],lastHand=0,rot=0,rotT=0,zoom=1,zoomT=1,lvl=0;
 /* ---------- UI ---------- */
 function setState(s,t){state=s;$('state').textContent=t||({idle:'beklemede',listen:'dinliyorum',think:'düşünüyorum',speak:'konuşuyorum'}[s]||s)}
 function log(c,h){const d=document.createElement('div');d.className=c;if(h&&h.html)d.innerHTML=h.html;else d.textContent=h;$('log').appendChild(d);$('log').scrollTop=1e9;while($('log').children.length>40)$('log').firstChild.remove()}
 function msg(t,ms=4000){const e=$('msg');e.textContent=t;clearTimeout(msg.h);if(t)msg.h=setTimeout(()=>e.textContent='',ms)}
-const sp=$('set');function openSet(v){sp.classList.toggle('on',v===undefined?!sp.classList.contains('on'):v);if(sp.classList.contains('on')){$('kG').value=S.kG;$('kD').value=S.kD;$('eng').value=S.eng;$('fast').checked=S.fast;$('vo').value=S.vo;$('vn').value=S.vn;$('always').checked=S.always;$('prev').checked=S.prev}}
+const sp=$('set');function openSet(v){sp.classList.toggle('on',v===undefined?!sp.classList.contains('on'):v);if(sp.classList.contains('on')){$('kG').value=S.kG;$('kD').value=S.kD;$('eng').value=S.eng;$('fast').checked=S.fast;$('vo').value=S.vo;$('vn').value=S.vn;$('always').checked=S.always;$('all').checked=S.all;$('prev').checked=S.prev}}
 $('bSet').onclick=()=>openSet();$('bSet2').onclick=()=>openSet(true);
-$('sSave').onclick=()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;S.vo=$('vo').value;S.vn=$('vn').value;S.always=$('always').checked;S.prev=$('prev').checked;for(const k in S)store.set(k==='fast'?'fast2':k,S[k]);openSet(false);$('cam').classList.toggle('on',S.prev&&camOn);models={};if(started)applyListen()};
+$('sSave').onclick=()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;S.vo=$('vo').value;S.vn=$('vn').value;S.always=$('always').checked;S.all=$('all').checked;S.prev=$('prev').checked;for(const k in S)store.set(k==='fast'?'fast2':k==='always'?'always2':k,S[k]);openSet(false);$('cam').classList.toggle('on',S.prev&&camOn);models={};if(started)applyListen()};
 $('sTest').onclick=async()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;models={};$('sInfo').textContent='test ediliyor…';try{const r=await ask('Sadece "tamam" de.',[]);$('sInfo').textContent='Çalıştı ('+r.engine+' · '+r.model+'): '+r.text}catch(e){$('sInfo').textContent='Hata: '+e.message}};
 /* ---------- speech out ---------- */
 let voice=null;function pickVoice(){const v=speechSynthesis.getVoices();voice=v.find(x=>/^tr/i.test(x.lang)&&/(google|neural|premium|enhanced)/i.test(x.name))||v.find(x=>/^tr/i.test(x.lang))||null}
@@ -92,7 +93,7 @@ async function playPCM(b64){
   AC=AC||new(window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')await AC.resume();
   const ab=AC.createBuffer(1,n,24000),ch=ab.getChannelData(0);for(let i=0;i<n;i++)ch[i]=buf[i]/32768;
   return new Promise(res=>{const src=AC.createBufferSource();src.buffer=ab;src.connect(AC.destination);curSrc=src;src.onended=()=>{curSrc=null;res()};src.start()})}
-function after(){speaking=false;setState('idle');setTimeout(()=>{if(conv||S.always||awakeUntil>Date.now())listenOnce()},250)}
+function after(){speaking=false;setState('idle');if(S.always)awakeUntil=Date.now()+15000;setTimeout(()=>{if(conv||S.always||awakeUntil>Date.now())listenOnce()},250)}
 async function say(text){
   const t=clean(text);if(!t){return}
   stopSpeech();stopRec();speaking=true;setState('speak');
@@ -104,7 +105,9 @@ async function say(text){
 /* ---------- speech in ---------- */
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec=null,recOn=false,awakeUntil=0;
 function stopRec(){if(NATIVE&&recOn&&PL('SpeechRecognition')){try{PL('SpeechRecognition').stop()}catch(e){}}if(rec){try{rec.onend=null;rec.abort()}catch(e){}}rec=null;recOn=false}
+let muteHook=false;function muteBeep(ms){try{const J=PL('JarvisView');J&&J.mute({ms:ms||1100})}catch(e){}}
 async function listenNative(){const SN=PL('SpeechRecognition');if(recOn||speaking)return;recOn=true;setState('listen');let t='';
+  if(!muteHook){muteHook=true;try{SN.addListener('listeningState',e=>{if(e&&e.status==='stopped')muteBeep(1200)})}catch(e){}}muteBeep(1200);
   try{const r=await SN.start({language:'tr-TR',maxResults:1,partialResults:false,popup:false});t=((r&&r.matches&&r.matches[0])||'').trim()}catch(e){if(/permission|izin/i.test(String(e&&e.message||e))){msg('Mikrofon izni verilmedi.');conv=false;setConv()}}
   recOn=false;if(t)handleSpeech(t);else{setState('idle');if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}}
 function listenOnce(){
@@ -120,7 +123,7 @@ function listenOnce(){
 function applyListen(){if(S.always)listenOnce();else stopRec()}
 function handleSpeech(t){
   t=t.replace(/^\s*(hey\s+|hey,?\s*)?(jarvis|jarvıs|cervis|çarvis|carvis|jarviz)[,.!]?\s*/i,'')||t;const low=t.toLowerCase();const wake=/(jarvis|jarvıs|cervis|çarvis|carvis)/i;
-  if(S.always&&!conv&&awakeUntil<Date.now()){ if(!wake.test(low)){setState('idle');setTimeout(listenOnce,300);return} t=t.replace(/(hey\s+|hey,?\s*)?(jarvis|jarvıs|cervis|çarvis|carvis)[,.!]?\s*/i,'').trim(); if(!t){wakeUp();return} }
+  if(S.always&&!S.all&&!conv&&awakeUntil<Date.now()){ if(!wake.test(low)){setState('idle');setTimeout(listenOnce,300);return} t=t.replace(/(hey\s+|hey,?\s*)?(jarvis|jarvıs|cervis|çarvis|carvis)[,.!]?\s*/i,'').trim(); if(!t){wakeUp();return} }
   awakeUntil=Date.now()+(S.always?0:0);
   run(t);
 }
@@ -132,17 +135,23 @@ $('bar').onsubmit=e=>{e.preventDefault();const t=$('txt').value.trim();if(!t)ret
 const SITES={youtube:'https://www.youtube.com',instagram:'https://www.instagram.com',whatsapp:'https://web.whatsapp.com',spotify:'https://open.spotify.com',gmail:'https://mail.google.com',harita:'https://maps.google.com',maps:'https://maps.google.com',twitter:'https://x.com',netflix:'https://www.netflix.com',github:'https://github.com',telegram:'https://web.telegram.org'};
 const APPS={whatsapp:'whatsapp://',youtube:'vnd.youtube://',instagram:'instagram://',spotify:'spotify://',telegram:'tg://',gmail:'googlegmail://',harita:'geo:0,0?q=',maps:'geo:0,0?q=',twitter:'twitter://',netflix:'nflx://'};
 async function openApp(k){if(NATIVE&&PL('AppLauncher')&&APPS[k]){try{await PL('AppLauncher').openUrl({url:APPS[k]});return true}catch(e){}}openUrl(SITES[k],k);return false}
-function openUrl(u,label){if(NATIVE&&PL('Browser')){try{PL('Browser').open({url:u});return}catch(e){}}
+let siteOpen=false;
+async function showSite(u,desktop){const J=PL('JarvisView');if(NATIVE&&J){try{holoT=0;await J.open({url:u,top:60,bottom:78,desktop:!!desktop});siteOpen=true;$('bClose').style.display='';return true}catch(e){log('s','Sayfa açılamadı: '+(e&&e.message||e))}}return false}
+function closeSite(){const J=PL('JarvisView');try{J&&J.close()}catch(e){}siteOpen=false;$('bClose').style.display='none'}
+$('bClose').onclick=closeSite;
+function openUrl(u,label){if(NATIVE&&PL('JarvisView')){showSite(u,/whatsapp/.test(u));return}
   log('s',{html:'<a href="'+u+'" target="_blank" rel="noopener">Aç: '+label+'</a>'});try{const w=window.open(u,'_blank');if(!w)msg('Açılmadıysa yazıdaki bağlantıya dokun.')}catch(e){}}
 function dur(t){const m=t.match(/(\d+)\s*(saniye|sn|dakika|dk|saat)/);if(!m)return 0;const n=+m[1];return n*(/saat/.test(m[2])?3600:/dak|dk/.test(m[2])?60:1)*1000}
 async function local(t){
   const l=t.toLowerCase().replace(/[’']/g,"'");
   if(/^(uyu|uyku modu|uykuya geç|bekleme modu|dinlemeyi (bırak|kapat)|görüşürüz|kapan)\b/.test(l)){conv=false;setConv();return 'Tamam, beklemeye geçiyorum. Gerekirse elini aç.'}
   if(holoT<=0&&/^(dur|sus|sessiz ol|yeter)\b/.test(l)){stopSpeech();setState('idle');return ''}
+  if(siteOpen&&/kapat|gizle|geri dön|çık/.test(l)){closeSite();return''}
   if(holoT>0){const HC=holoCmd(l);if(HC!==null)return HC}
   if(/(hologram|ekrandan|ekrana).*(kapat|gizle|kaldır)|^(kapat|gizle)$|yansıtmayı (kapat|durdur)/.test(l)){holoT=0;return 'Hologramı kapattım.'}
   { const hk=holoKey(l); if(hk&&/yansıt|göster|hologram|incele|aç|getir|tara|ekrana/.test(l)){holoName=hk;holoT=1;exT=0;return HOLO_SAY[hk]} }
-  if(/yansıt|ekrana getir|ekranda göster/.test(l)){const k=Object.keys(SITES).find(k=>l.includes(k));if(k){if(NATIVE){await openApp(k);return k+' açıldı.'}openUrl(SITES[k],k);return k+' sayfaya gömülemiyor, yansıtamadım. Yeni sekmede açtım.'}return 'Bunu ekrana yansıtamıyorum. Yansıtabildiklerim: zırh, kask, DNA, küre ve küp.'}
+  if(/yansıt|ekrana getir|ekranda göster/.test(l)){const k=Object.keys(SITES).find(k=>l.includes(k));if(NATIVE&&PL('JarvisView')){const dm=l.match(/([a-z0-9-]+\.(com|net|org|tr|io|gov|edu)(\/\S*)?)/);let u=null,d=false;if(dm)u='https://'+dm[1];else if(k){u=SITES[k];d=k==='whatsapp'}else{const q=l.replace(/ekrana|ekranda|yansıt\w*|göster\w*|getir\w*|lütfen|bana|bir|haberlerini|haberleri/g,' ').replace(/\s+/g,' ').trim();if(q)u='https://www.google.com/search?q='+encodeURIComponent(q)}if(u&&await showSite(u,d))return 'Ekranda. Kapatmak için kapat de.'}
+    if(k){openUrl(SITES[k],k);return k+' sayfaya gömülemiyor, yeni sekmede açtım.'}return 'Bunu ekrana yansıtamıyorum. Yansıtabildiklerim: zırh, kask, DNA, küre ve küp.'}
   if(/kaç.*saat|saat kaç|saati söyle/.test(l))return 'Saat '+new Date().toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})+'.';
   if(/bugün.*(gün|tarih)|tarih(i)? söyle|bugün ayın|hangi gün/.test(l))return 'Bugün '+new Date().toLocaleDateString('tr-TR',{day:'numeric',month:'long',year:'numeric',weekday:'long'})+'.';
   if(/pil|şarj/.test(l)&&navigator.getBattery){const b=await navigator.getBattery();return 'Pil yüzde '+Math.round(b.level*100)+(b.charging?', şarj oluyor.':'.')}
