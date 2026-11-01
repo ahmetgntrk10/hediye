@@ -575,6 +575,16 @@ jobs:
               } catch (Exception e) { fail(call, e); }
             }
             @PluginMethod
+            public void shot(PluginCall call) {
+              if (JarvisAccess.inst == null) { call.reject("erişilebilirlik kapalı"); return; }
+              JarvisAccess.inst.shot(call);
+            }
+            @PluginMethod
+            public void notifRead(PluginCall call) {
+              getContext().getSharedPreferences("jarvis", Context.MODE_PRIVATE).edit().putBoolean("readNotif", call.getBoolean("on", false)).putBoolean("readHeadset", call.getBoolean("headset", true)).apply();
+              call.resolve();
+            }
+            @PluginMethod
             public void accState(PluginCall call) {
               JSObject r = new JSObject();
               r.put("on", JarvisAccess.inst != null);
@@ -901,6 +911,12 @@ jobs:
           import android.view.accessibility.AccessibilityEvent;
           import android.view.accessibility.AccessibilityNodeInfo;
           import android.view.accessibility.AccessibilityWindowInfo;
+          import android.graphics.Bitmap;
+          import android.util.Base64;
+          import android.view.Display;
+          import java.io.ByteArrayOutputStream;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.PluginCall;
           import java.util.ArrayList;
           import java.util.List;
           public class JarvisAccess extends AccessibilityService {
@@ -1014,6 +1030,30 @@ jobs:
               }
               return null;
             }
+            void shot(final PluginCall call) {
+              if (android.os.Build.VERSION.SDK_INT < 30) { call.reject("Android 11 ve üstü gerekiyor"); return; }
+              try {
+                takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new AccessibilityService.TakeScreenshotCallback() {
+                  @Override
+                  public void onSuccess(AccessibilityService.ScreenshotResult r) {
+                    try {
+                      Bitmap hw = Bitmap.wrapHardwareBuffer(r.getHardwareBuffer(), r.getColorSpace());
+                      Bitmap b = hw.copy(Bitmap.Config.ARGB_8888, false);
+                      int w = 720;
+                      int h = Math.max(1, b.getHeight() * w / b.getWidth());
+                      Bitmap sc = Bitmap.createScaledBitmap(b, w, h, true);
+                      ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                      sc.compress(Bitmap.CompressFormat.JPEG, 70, bo);
+                      JSObject o = new JSObject();
+                      o.put("img", Base64.encodeToString(bo.toByteArray(), Base64.NO_WRAP));
+                      call.resolve(o);
+                    } catch (Exception e) { call.reject("görüntü işlenemedi: " + e.getMessage()); }
+                  }
+                  @Override
+                  public void onFailure(int code) { call.reject("ekran görüntüsü alınamadı (" + code + ")"); }
+                });
+              } catch (Exception e) { call.reject("ekran görüntüsü hatası: " + e.getMessage()); }
+            }
             String doAct(String a, String text, int idx, String dir, int x, int y) {
               try {
                 if (a.equals("back")) return performGlobalAction(GLOBAL_ACTION_BACK) ? "ok geri" : "olmadı";
@@ -1061,6 +1101,7 @@ jobs:
             android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagReportViewIds"
             android:canRetrieveWindowContent="true"
             android:canPerformGestures="true"
+            android:canTakeScreenshot="true"
             android:notificationTimeout="200"
             android:description="@string/jarvis_acc_desc" />
           XML
@@ -1069,16 +1110,77 @@ jobs:
           cat > $D/JarvisNotif.java <<'JAVA'
           package com.tapverse.jarvis;
           import android.app.Notification;
+          import android.content.Context;
+          import android.content.SharedPreferences;
           import android.content.pm.PackageManager;
+          import android.media.AudioDeviceInfo;
+          import android.media.AudioManager;
           import android.os.Bundle;
           import android.service.notification.NotificationListenerService;
           import android.service.notification.StatusBarNotification;
+          import android.speech.tts.TextToSpeech;
+          import java.util.HashSet;
+          import java.util.Locale;
+          import java.util.Set;
           public class JarvisNotif extends NotificationListenerService {
             static JarvisNotif inst;
+            private TextToSpeech tts;
+            private boolean ready = false;
+            private final Set<String> seen = new HashSet<String>();
+            private static final String[] MSG = { "com.whatsapp", "com.whatsapp.w4b", "org.telegram.messenger", "com.instagram.android", "com.google.android.apps.messaging", "com.android.mms", "com.samsung.android.messaging", "com.facebook.orca", "com.twitter.android", "com.android.dialer", "com.google.android.dialer", "com.samsung.android.dialer", "com.android.server.telecom" };
             @Override
-            public void onListenerConnected() { inst = this; }
+            public void onListenerConnected() {
+              inst = this;
+              tts = new TextToSpeech(getApplicationContext(), new TextToSpeech.OnInitListener() {
+                public void onInit(int st) {
+                  ready = st == TextToSpeech.SUCCESS;
+                  if (ready) tts.setLanguage(new Locale("tr", "TR"));
+                }
+              });
+            }
             @Override
-            public void onListenerDisconnected() { inst = null; }
+            public void onListenerDisconnected() {
+              inst = null;
+              try { if (tts != null) tts.shutdown(); } catch (Exception e) {}
+            }
+            private boolean headsetOn() {
+              try {
+                AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                  int t = d.getType();
+                  if (t == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || t == AudioDeviceInfo.TYPE_WIRED_HEADSET || t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || t == AudioDeviceInfo.TYPE_USB_HEADSET) return true;
+                }
+              } catch (Exception e) {}
+              return false;
+            }
+            @Override
+            public void onNotificationPosted(StatusBarNotification sbn) {
+              try {
+                SharedPreferences sp = getSharedPreferences("jarvis", Context.MODE_PRIVATE);
+                if (!sp.getBoolean("readNotif", false) || !ready) return;
+                Notification n = sbn.getNotification();
+                if (n == null || sbn.getPackageName().equals(getPackageName())) return;
+                if ((n.flags & Notification.FLAG_ONGOING_EVENT) != 0 || (n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return;
+                boolean imp = Notification.CATEGORY_MESSAGE.equals(n.category) || "missed_call".equals(n.category);
+                for (String p : MSG) if (p.equals(sbn.getPackageName())) imp = true;
+                if (!imp) return;
+                if (sp.getBoolean("readHeadset", true) && !headsetOn()) return;
+                AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                if (am.getMode() != AudioManager.MODE_NORMAL) return;
+                Bundle e = n.extras;
+                CharSequence t = e.getCharSequence(Notification.EXTRA_TITLE);
+                CharSequence x = e.getCharSequence(Notification.EXTRA_TEXT);
+                if (x == null && t == null) return;
+                String key = sbn.getKey() + "|" + x;
+                if (!seen.add(key)) return;
+                if (seen.size() > 200) seen.clear();
+                String app = sbn.getPackageName();
+                try { PackageManager pm = getPackageManager(); app = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(sbn.getPackageName(), 0))); } catch (Exception e2) {}
+                String say = app + (t != null ? ", " + t : "") + (x != null ? ": " + x : "");
+                if (say.length() > 220) say = say.substring(0, 220);
+                tts.speak(say, TextToSpeech.QUEUE_ADD, null, "n" + System.nanoTime());
+              } catch (Exception ex) {}
+            }
             private String esc(String s) {
               return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ").replace("\t", " ");
             }
