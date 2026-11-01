@@ -464,6 +464,15 @@ jobs:
               } catch (Exception e) { fail(call, e); }
             }
             @PluginMethod
+            public void locked(PluginCall call) {
+              JSObject r = new JSObject();
+              try {
+                android.app.KeyguardManager km = (android.app.KeyguardManager) getContext().getSystemService(Context.KEYGUARD_SERVICE);
+                r.put("locked", km.isKeyguardLocked());
+              } catch (Exception e) { r.put("locked", false); }
+              call.resolve(r);
+            }
+            @PluginMethod
             public void accState(PluginCall call) {
               JSObject r = new JSObject();
               r.put("on", JarvisAccess.inst != null);
@@ -962,6 +971,7 @@ jobs:
               registerPlugin(JarvisViewPlugin.class);
               super.onCreate(b);
               alive = true;
+              try { if (android.os.Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true); } } catch (Exception e) {}
               WakeService.setPaused(true);
               Window w = getWindow();
               w.setGravity(Gravity.BOTTOM);
