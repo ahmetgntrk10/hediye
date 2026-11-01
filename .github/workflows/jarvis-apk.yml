@@ -171,6 +171,17 @@ jobs:
               }
             }
             @PluginMethod
+            public void unmute(PluginCall call) {
+              try {
+                AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+                for (int s : muted) {
+                  try { am.adjustStreamVolume(s, AudioManager.ADJUST_UNMUTE, 0); } catch (Exception e) {}
+                }
+                muted.clear();
+              } catch (Exception e) {}
+              call.resolve();
+            }
+            @PluginMethod
             public void mute(PluginCall call) {
               int ms = call.getInt("ms", 1100);
               final AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
@@ -779,6 +790,21 @@ jobs:
                 lastError = "dinleme başlamadı: " + e.getMessage();
               }
             }
+            private android.view.View anchor;
+            private void addAnchor() {
+              try {
+                if (anchor != null || !android.provider.Settings.canDrawOverlays(this)) return;
+                android.view.WindowManager wm = (android.view.WindowManager) getSystemService(Context.WINDOW_SERVICE);
+                android.view.View v = new android.view.View(this);
+                android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams(1, 1,
+                  Build.VERSION.SDK_INT >= 26 ? android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : android.view.WindowManager.LayoutParams.TYPE_PHONE,
+                  android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE | android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                  android.graphics.PixelFormat.TRANSLUCENT);
+                lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+                wm.addView(v, lp);
+                anchor = v;
+              } catch (Throwable e) {}
+            }
             private void copyAssets(AssetManager am, String from, File to) throws Exception {
               String[] list = am.list(from);
               if (list != null && list.length > 0) {
@@ -835,6 +861,7 @@ jobs:
                 return START_NOT_STICKY;
               }
               inst = this;
+              addAnchor();
               if (Build.VERSION.SDK_INT >= 26) {
                 NotificationChannel ch = new NotificationChannel("jarvis_wake", "Jarvis dinleme", NotificationManager.IMPORTANCE_LOW);
                 ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).createNotificationChannel(ch);
@@ -958,6 +985,7 @@ jobs:
             @Override
             public void onDestroy() {
               stopListen();
+              try { if (anchor != null) { ((android.view.WindowManager) getSystemService(Context.WINDOW_SERVICE)).removeView(anchor); anchor = null; } } catch (Throwable e) {}
               try { if (model != null) model.close(); } catch (Exception e) {}
               model = null;
               running = false;
