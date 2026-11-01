@@ -519,7 +519,7 @@ jobs:
             }
             void pause(boolean p) {
               paused = p;
-              if (p) stopListen(); else startListen();
+              if (p) stopListen(); else { lastWake = System.currentTimeMillis() + 3000; startListen(); }
             }
             private synchronized void stopListen() {
               try { if (ss != null) { ss.stop(); ss.shutdown(); } } catch (Exception e) {}

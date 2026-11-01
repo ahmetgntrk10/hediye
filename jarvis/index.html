@@ -122,10 +122,11 @@ async function say(text){
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec=null,recOn=false,awakeUntil=0;
 function stopRec(){if(NATIVE&&recOn&&PL('SpeechRecognition')){try{PL('SpeechRecognition').stop()}catch(e){}}if(rec){try{rec.onend=null;rec.abort()}catch(e){}}rec=null;recOn=false}
 let muteHook=false;function muteBeep(ms){try{const J=PL('JarvisView');J&&J.mute({ms:ms||1100})}catch(e){}}
+let emptyN=0;
 async function listenNative(){const SN=PL('SpeechRecognition');if(recOn||speaking)return;recOn=true;setState('listen');let t='';
   if(!muteHook){muteHook=true;try{SN.addListener('listeningState',e=>{if(e&&e.status==='stopped')muteBeep(1200)})}catch(e){}}muteBeep(1200);
   try{const r=await SN.start({language:'tr-TR',maxResults:1,partialResults:false,popup:false});t=((r&&r.matches&&r.matches[0])||'').trim()}catch(e){if(/permission|izin/i.test(String(e&&e.message||e))){msg('Mikrofon izni verilmedi.');conv=false;setConv()}}
-  recOn=false;if(t)handleSpeech(t);else{setState('idle');if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}}
+  recOn=false;if(t){emptyN=0;handleSpeech(t)}else{setState('idle');if(MINI&&++emptyN>=2){closePanel();return}if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}}
 function listenOnce(){
   if(NATIVE&&PL('SpeechRecognition'))return listenNative();
   if(!SR){msg('Bu tarayıcıda ses tanıma yok. Yazarak kullan.');return}
@@ -509,7 +510,7 @@ $('go').onclick=async()=>{
 };
 if(!SR&&!NATIVE)$('bMic').style.display='none';
 function closePanel(){stopSpeech();stopRec();try{PL('JarvisView').finish()}catch(e){}}
-async function initMode(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{const r=await J.mode();if(r&&r.mode==='mini'){MINI=true;document.body.classList.add('mini');$('start').style.display='none';started=true;conv=true;setConv();lastAct=Date.now();setInterval(()=>{if(!busy&&!speaking&&Date.now()-lastAct>10000)closePanel()},1000);setTimeout(()=>say('Dinliyorum.'),250)}else{if(S.wake)applyWake()}}catch(e){}}
+async function initMode(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{const r=await J.mode();if(r&&r.mode==='mini'){MINI=true;document.body.classList.add('mini');$('start').style.display='none';started=true;conv=true;setConv();lastAct=Date.now();const t0=Date.now();setInterval(()=>{muteBeep(3000);if((!busy&&!speaking&&Date.now()-lastAct>10000)||Date.now()-t0>90000)closePanel()},1500);setTimeout(()=>say('Dinliyorum.'),250)}else{if(S.wake)applyWake()}}catch(e){}}
 initMode();
 window.__jv={feed(h,t){procHands(h,t)},get st(){return{conv,exT,yawT,zoomT,pitchT,holoT,glabel}},holo(v){holoName='armor';holoT=v;holoA=v;exT=0}};
 </script>
