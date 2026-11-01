@@ -84,7 +84,7 @@ const S={kG:store.get('kG',''),kD:store.get('kD',''),eng:store.get('eng','auto')
 let conv=false,state='idle',started=false,speaking=false,awake=false,hist=[],lastHand=0,rot=0,rotT=0,zoom=1,zoomT=1,lvl=0;
 /* ---------- UI ---------- */
 function setState(s,t){state=s;$('state').textContent=t||({idle:'beklemede',listen:'dinliyorum',think:'düşünüyorum',speak:'konuşuyorum'}[s]||s)}
-let MINI=false,lastAct=Date.now();
+let RESTRICT=false;let MINI=false,lastAct=Date.now();
 function log(c,h){if(MINI){if(c==='u')$('mu').textContent=String(h).replace(/^›\s*/,'');else if(c==='j')$('mj').textContent=h;lastAct=Date.now()}
   const d=document.createElement('div');d.className=c;if(h&&h.html)d.innerHTML=h.html;else d.textContent=h;$('log').appendChild(d);$('log').scrollTop=1e9;while($('log').children.length>40)$('log').firstChild.remove()}
 function msg(t,ms=4000){const e=$('msg');e.textContent=t;clearTimeout(msg.h);if(t)msg.h=setTimeout(()=>e.textContent='',ms)}
@@ -170,6 +170,7 @@ async function local(t){
   if(/kamera(yı|yi)? (aç|başlat|çalıştır)|el takibini aç/.test(l)){if(MINI)return 'Kamera sadece tam uygulamada açılır.';startCam();return 'Kamerayı açıyorum.'}
   if(/kamera(yı|yi)? (kapat|durdur)|el takibini kapat/.test(l)){stopCam();return 'Kamerayı kapattım.'}
   if(MINI&&/^(tamam|kapat|sağ ol|teşekkür|görüşürüz|yeter|bu kadar|hepsi bu)/.test(l)){setTimeout(closePanel,200);return''}
+  if(/haber/.test(l)&&/(bak|oku|neler|son|ver|anlat|göster)/.test(l)){const n=await newsNow();if(n)return n}
   if(siteOpen&&/kapat|gizle|geri dön|çık/.test(l)){closeSite();return''}
   if(NATIVE&&PL('JarvisView')){const pr=await phoneCmd(l,t);if(pr!==null)return pr}
   if(holoT>0){const HC=holoCmd(l);if(HC!==null)return HC}
@@ -230,7 +231,7 @@ const WEBQ=/bugün|şu an|şimdi|güncel|haber|son dakika|kimdir|fiyat|kur\b|dol
 async function run(text){
   if(busy)return;busy=true;log('u','› '+text);setState('think');clearInterval(window._iv);const t0s=Date.now(),iv=window._iv=setInterval(()=>{if(state==='think')$('state').textContent='düşünüyorum '+Math.round((Date.now()-t0s)/1000)+'s'},1000);
   try{
-    let r=await local(text);
+    let r;if(RESTRICT&&/\b(ara|arar|arama|mesaj|whatsapp|sms|aç|kapat|alarm|rehber|kişi|kişisi|fener|ses|yaz|gönder|uygulama|kameray)\w*/i.test(text))r='Telefon kilitliyken bunu yapmam. Önce kilidi aç.';else r=await local(text);
     if(r===''){clearInterval(iv);busy=false;setState('idle');if(conv||S.always)setTimeout(listenOnce,250);return}
     if(r){log('j',r);hist.push({r:'u',t:text},{r:'a',t:r});busy=false;await say(r);return}
     let img=null;if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&camOn)img=grab();
@@ -475,13 +476,14 @@ async function agent(goal){
     if(!res)res='Çok uzun sürdü, yarıda bıraktım.'}
   finally{agentOn=false;try{await J.keep({on:false})}catch(e){}}
   return res}
+async function newsNow(){try{const H=PL('CapacitorHttp');if(!H)return null;const r=await H.get({url:'https://news.google.com/rss?hl=tr&gl=TR&ceid=TR:tr',responseType:'text'});const x=String(r&&r.data||'');const it=[...x.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].slice(0,5).map(m=>m[1].replace(/<!\[CDATA\[|\]\]>/g,'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/\s+-\s+[^-]+$/,'').trim());if(it.length)return'Güncel başlıklar: '+it.map((s,i)=>(i+1)+') '+s).join('. ')}catch(e){}return null}
 async function execAct(a){const J=PL('JarvisView');if(!J||!a)return'';try{switch(a.t){
   case'call':return await actCall(a.name||'');case'sms':return await actSms(a.name||'',a.text||'');case'wa':return await actWa(a.name||'',a.text||'');
   case'alarm':{const h=+a.h,m=+(a.m||0);if(!(h>=0&&h<24))return'';await J.alarm({hour:h,minutes:m});return'Alarm '+fm(h,m)+' için kuruldu.'}
   case'timer':await J.timer({seconds:Math.max(1,Math.round(+a.sec||60))});return'Zamanlayıcı kuruldu.';
   case'torch':await J.torch({on:a.on!==false});return a.on===false?'Fener kapandı.':'Fener açıldı.';
   case'volume':{const r=await J.volume(a.level!=null?{level:+a.level}:{delta:+a.delta||0});return'Ses yüzde '+r.pct+'.'}
-  case'open':{const r=await J.openApp({name:a.app||''});return r&&r.ok?(r.label+' açılıyor.'):(a.app+' uygulamasını bulamadım.')}
+  case'open':{const r=await J.openApp({name:a.app||''});if(r&&r.ok)return r.label+' açılıyor.';return await agent((a.app||'')+' uygulamasını bul ve aç.')}
   case'nav':await J.navigate({q:a.q||''});return'Navigasyon açılıyor.';
   case'settings':await J.settings({page:a.page||''});return'Ayar sayfasını açtım.';
   case'agent':return await agent(a.goal||'');}}catch(e){return'Yapamadım: '+String(e&&e.message||e).slice(0,80)}return''}
@@ -507,7 +509,7 @@ async function phoneCmd(l,t){const J=PL('JarvisView');let m;
   m=l.match(/(wifi|wi-fi|bluetooth|konum|uçak modu|ekran ayar\w*|ses ayar\w*|pil tasarruf\w*|ayarları aç|ayarlar)/);
   if(m&&/aç|kapat|ayar/.test(l)){const pg=/wifi|wi-fi/.test(m[1])?'wifi':/bluetooth/.test(m[1])?'bluetooth':/konum/.test(m[1])?'location':/uçak/.test(m[1])?'airplane':/ekran/.test(m[1])?'display':/ses/.test(m[1])?'sound':/pil/.test(m[1])?'battery':'';await J.settings({page:pg});return'Android doğrudan açıp kapatmama izin vermiyor. Ayar sayfasını açtım.'}
   if(/(yol tarifi|navigasyon|götür)/.test(l)){const q=l.replace(/yol tarifi|navigasyonu?|başlat|götür\w*|bana|lütfen|için|ver/g,' ').replace(/['’]?\s*(ye|ya|e|a)\s*$/,'').replace(/\s+/g,' ').trim();if(q)return await execAct({t:'nav',q})}
-  m=l.match(/^(.+?)\s+(aç|açar mısın|açsana|başlat)$/);if(m&&!/hologram|ekran|zırh|kask|küre|küp|dna/.test(m[1])&&m[1].length<30){const r=await J.openApp({name:m[1]});if(r&&r.ok)return r.label+' açılıyor.'}
+  m=l.match(/^(.+?)\s+(aç|açar mısın|açsana|başlat)$/);if(m&&!/hologram|ekran|zırh|kask|küre|küp|dna/.test(m[1])&&m[1].length<30){const r=await J.openApp({name:m[1]});if(r&&r.ok)return r.label+' açılıyor.';if(await accOn())return await agent(m[1]+' uygulamasını bul ve aç.')}
   return null}
 /* ---------- orb ---------- */
 const cv=$('orb'),g=cv.getContext('2d');let W=0,H=0,DPR=1,pulse=0,t0=performance.now();
@@ -546,7 +548,7 @@ $('go').onclick=async()=>{
 };
 if(!SR&&!NATIVE)$('bMic').style.display='none';
 function closePanel(){stopSpeech();stopRec();try{PL('JarvisView').finish()}catch(e){}}
-async function initMode(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{const r=await J.mode();if(r&&r.mode==='mini'){MINI=true;document.body.classList.add('mini');$('start').style.display='none';started=true;conv=true;setConv();lastAct=Date.now();const t0=Date.now();setInterval(()=>{muteBeep(3000);if((!busy&&!speaking&&Date.now()-lastAct>10000)||Date.now()-t0>200000)closePanel()},1500);setTimeout(()=>say('Dinliyorum.'),250)}else{if(S.wake)applyWake()}}catch(e){}}
+async function initMode(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{const r=await J.mode();if(r&&r.mode==='mini'){MINI=true;RESTRICT=!!r.locked;document.body.classList.add('mini');$('start').style.display='none';started=true;conv=true;setConv();lastAct=Date.now();const t0=Date.now();setInterval(()=>{muteBeep(3000);if((!busy&&!speaking&&Date.now()-lastAct>10000)||Date.now()-t0>200000)closePanel()},1500);setTimeout(()=>say('Dinliyorum.'),250)}else{if(S.wake)applyWake()}}catch(e){}}
 initMode();
 window.__jv={feed(h,t){procHands(h,t)},get st(){return{conv,exT,yawT,zoomT,pitchT,holoT,glabel}},holo(v){holoName='armor';holoT=v;holoA=v;exT=0}};
 </script>

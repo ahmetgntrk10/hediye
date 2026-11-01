@@ -413,6 +413,7 @@ jobs:
             public void mode(PluginCall call) {
               JSObject r = new JSObject();
               r.put("mode", getActivity() instanceof OverlayActivity ? "mini" : "main");
+              try { r.put("locked", ((android.app.KeyguardManager) getContext().getSystemService(Context.KEYGUARD_SERVICE)).isKeyguardLocked()); } catch (Exception e) {}
               call.resolve(r);
             }
             @PluginMethod
@@ -666,13 +667,19 @@ jobs:
               if (model == null) loadModel(); else startListen();
               return START_STICKY;
             }
-            private void check(String json) {
+            private void check(String json, boolean partial) {
               if (paused || json == null) return;
               String t = json.toLowerCase();
               events++;
               String hh = t.replaceAll("[^a-z\\[\\] ]", "").replace("partial", "").replace("text", "").trim();
               if (hh.length() > 0) heard = hh;
-              boolean hit = t.contains("jarvis") || t.contains("assistant") || t.contains("assistance") || t.contains("a system") || t.contains("asistan");
+              boolean hit = t.contains("jarvis") || ((t.contains("hey") || t.contains("hay")) && (t.contains("assist") || t.contains("a system") || t.contains("asistan")));
+              if (hit && partial) {
+                try {
+                  android.media.AudioManager am = (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                  if (am != null && am.isMusicActive()) hit = false;
+                } catch (Exception e) {}
+              }
               if (hit) {
                 long now = System.currentTimeMillis();
                 if (now - lastWake < 2500) return;
@@ -699,9 +706,9 @@ jobs:
                 pause(false);
               }
             }
-            @Override public void onPartialResult(String h) { check(h); }
-            @Override public void onResult(String h) { check(h); }
-            @Override public void onFinalResult(String h) { check(h); }
+            @Override public void onPartialResult(String h) { check(h, true); }
+            @Override public void onResult(String h) { check(h, false); }
+            @Override public void onFinalResult(String h) { check(h, false); }
             @Override public void onError(Exception e) { lastError = "ses hatası: " + e.getMessage(); }
             @Override public void onTimeout() {}
             @Override
@@ -971,6 +978,7 @@ jobs:
               registerPlugin(JarvisViewPlugin.class);
               super.onCreate(b);
               alive = true;
+              if (android.os.Build.VERSION.SDK_INT >= 27) setShowWhenLocked(true);
               try { if (android.os.Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true); } } catch (Exception e) {}
               WakeService.setPaused(true);
               Window w = getWindow();
