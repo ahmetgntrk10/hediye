@@ -27,6 +27,7 @@ const TOOLS = [
   { name: 'remember', description: 'Kullanıcı hakkında kalıcı bir bilgiyi hafızaya kaydeder (tercih, kişi, alışkanlık). Sadece kullanıcı söylediyse kaydet.', parameters: { type: 'OBJECT', properties: { text: { type: 'STRING' } }, required: ['text'] } },
   { name: 'recall', description: 'Hafızada arama yapar.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
   { name: 'web_search', description: 'İnternette güncel bilgi arar (haber, e-posta adresi, fiyat, adres...). Sonucu özet olarak döndürür.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
+  { name: 'phone_action', description: "Telefonda yapılacak işi uygulamaya iletir (sen yapmazsın, uygulama telefonda yapar). Türler: call(name) kişiyi ara; sms(name,text); wa(name,text) WhatsApp mesajı; alarm(h,m); timer(sec); torch(on); volume(level 0-100); open(app); nav(q) yol tarifi; settings(page: wifi|bluetooth|location|airplane|display|sound|battery). Birden çok kişi/iş varsa her biri için ayrı çağır. 112/155/110/156 gibi acil numaraları ASLA bu araçla arama.", parameters: { type: 'OBJECT', properties: { type: { type: 'STRING', enum: ['call', 'sms', 'wa', 'alarm', 'timer', 'torch', 'volume', 'open', 'nav', 'settings'] }, name: { type: 'STRING' }, text: { type: 'STRING' }, h: { type: 'INTEGER' }, m: { type: 'INTEGER' }, sec: { type: 'INTEGER' }, on: { type: 'BOOLEAN' }, level: { type: 'INTEGER' }, app: { type: 'STRING' }, q: { type: 'STRING' }, page: { type: 'STRING' } }, required: ['type'] } },
   { name: 'list_email_accounts', description: 'Kullanıcının e-posta gönderebileceği hesapların listesi.', parameters: { type: 'OBJECT', properties: {} } },
   { name: 'send_email', description: 'E-posta gönderme isteği hazırlar. Doğrudan göndermez; kullanıcı onayına sunar. account alanını kullanıcı açıkça söylemediyse ASLA tahmin etme, önce sor.', parameters: { type: 'OBJECT', properties: { account: { type: 'STRING', description: 'Gönderen hesap, listedekilerden biri' }, to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' } }, required: ['account', 'to', 'subject', 'body'] } }
 ];
@@ -51,6 +52,14 @@ async function runTool(name, args, ctx) {
     return { sonuc: r.rows.map(x => x.text) };
   }
   if (name === 'web_search') return await webSearch(String(args.query || ''));
+  if (name === 'phone_action') {
+    const t = String(args.type || '');
+    if (!['call', 'sms', 'wa', 'alarm', 'timer', 'torch', 'volume', 'open', 'nav', 'settings'].includes(t)) return { hata: 'bilinmeyen tür' };
+    if (t === 'call' && /^\s*(112|155|110|156)\s*$/.test(String(args.name || ''))) return { hata: 'Acil numara bu araçla aranmaz.' };
+    const a = { t }; for (const k of ['name', 'text', 'h', 'm', 'sec', 'on', 'level', 'app', 'q', 'page']) if (args[k] !== undefined) a[k] = args[k];
+    (ctx.actions = ctx.actions || []).push(a);
+    return { tamam: true, not: 'Uygulama telefonda yapacak. Yaptım diyebilirsin, kısaca söyle.' };
+  }
   if (name === 'list_email_accounts') return { hesaplar: ACCOUNTS, not: ACCOUNTS.length > 1 ? 'Birden fazla hesap var: kullanıcı söylemediyse sor.' : '' };
   if (name === 'send_email') {
     if (!ACCOUNTS.length) return { hata: 'E-posta hesabı tanımlı değil.' };
@@ -83,7 +92,10 @@ Kurallar:
 - Birden fazla e-posta hesabı varsa hangisinden gönderileceğini kullanıcı söylemediyse sor, kendin seçme.
 - Kişi bilgisini (e-posta adresi gibi) bilmiyorsan web_search ile ara, bulamazsan söyle, uydurma.
 - Kullanıcı bir bilgiyi hatırlamanı isterse remember kullan.
-- Emin olmadığın ya da riskli bir şey varsa kullanıcıya sor.`;
+- Emin olmadığın ya da riskli bir şey varsa kullanıcıya sor.
+- Telefonda yapılacak işler (arama, mesaj, alarm, zamanlayıcı, fener, ses, uygulama açma, yol tarifi, ayar) için phone_action aracını çağır; bunları sen yapamazsın, uygulama yapar.
+- Cevabın en fazla 2 kısa cümle olsun. Asla "istersen", "ister misin", "yardımcı olabilirim", "bakayım mı" gibi teklif ya da soru cümlesi kurma. Güncel bilgi gerekiyorsa "bakayım" deme, web_search ile bakıp sonucu söyle.
+- Önceki konuşmayı dikkate al: kısa sorular bir önceki konuyla ilgilidir.`;
 
 async function geminiLoop(text, history, ctx) {
   const contents = [...history.map(h => ({ role: h.r === 'u' ? 'user' : 'model', parts: [{ text: h.t }] })), { role: 'user', parts: [{ text }] }];
@@ -117,12 +129,12 @@ async function deepFallback(text, history) {
 }
 
 async function think(text, history, opts = {}) {
-  const ctx = { approvals: [], taskId: opts.taskId, mem: '' };
+  const ctx = { approvals: [], actions: [], taskId: opts.taskId, mem: '' };
   try { const m = await q('select text from memories order by id desc limit 15'); ctx.mem = m.rows.map(x => '- ' + x.text).join('\n'); } catch (e) {}
   let reply;
   try { if (!GEMINI_KEY) throw new Error('Gemini anahtarı yok'); reply = await geminiLoop(text, history, ctx); }
   catch (e) { try { reply = await deepFallback(text, history); } catch (e2) { reply = 'Beynime ulaşamadım: ' + String(e.message).slice(0, 80); } }
-  return { reply, approvals: ctx.approvals };
+  return { reply, approvals: ctx.approvals, actions: ctx.actions };
 }
 
 /* ---------- onay ---------- */
@@ -158,7 +170,9 @@ app.post('/chat', auth, async (req, res) => {
     if (pend && YES.test(text)) { const o = await decide(pend.id, true); return res.json({ reply: o.msg, approvals: [] }); }
     if (pend && NO.test(text)) { const o = await decide(pend.id, false); return res.json({ reply: o.msg, approvals: [] }); }
     await q('insert into chat_log(role,text) values($1,$2)', ['u', text]);
+    const t0 = Date.now();
     const out = await think(text, history);
+    out.ms = Date.now() - t0;
     await q('insert into chat_log(role,text) values($1,$2)', ['a', out.reply]);
     res.json(out);
   } catch (e) { res.status(500).json({ error: String(e.message || e) }); }

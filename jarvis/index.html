@@ -260,17 +260,17 @@ const TASKRX=/(arka planda|ben yokken|ben dönene kadar|görev (ver|ekle|olarak)
 const YESRX=/^(evet|tamam|onay(la)?|gönder|yolla|olur|aynen|doğru|yap|hayır|hayir|vazgeç|iptal|gönderme|yapma|olmaz|dur)\b/i;
 let srvPend=false,srvSeen={};
 const srvOn=()=>!!(S.sU&&S.sT);
-function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 21:40 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
+function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 22:10 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
 async function srvCall(path,body,get){const url=S.sU.replace(/\/+$/,'')+path,headers={'Authorization':'Bearer '+S.sT,'Content-Type':'application/json'};const H=NATIVE&&PL('CapacitorHttp');
   if(H){const r=await(get?H.get({url,headers,connectTimeout:15000,readTimeout:70000}):H.post({url,headers,data:body,connectTimeout:15000,readTimeout:70000}));if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(r.status>=400)throw new Error('sunucu '+r.status);return typeof r.data==='string'?JSON.parse(r.data):r.data}
   const r=await tfetch(url,{method:get?'GET':'POST',headers,body:get?undefined:JSON.stringify(body)},70000);if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(!r.ok)throw new Error('sunucu '+r.status);return r.json()}
 function queueTask(t){const q=store.get('queue',[]);q.push(t);store.set('queue',q);srvStat()}
 async function syncQueue(){const q=store.get('queue',[]);if(!q.length||!srvOn()||navigator.onLine===false)return;try{await srvCall('/tasks',{tasks:q});store.set('queue',[]);srvStat();log('s',q.length+' bekleyen görev sunucuya gönderildi, başlıyor.');return q.length}catch(e){log('s','Görevler gönderilemedi: '+e.message)}}
-async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);return o.reply||'Cevap gelmedi.'}
+async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);let r=o.reply||'';if(o.ms)log('s','sunucu '+(o.ms/1000).toFixed(1)+'s');if(NATIVE&&o.actions&&o.actions.length){for(const a of o.actions){const rs=await execAct(a);if(rs&&(!r||/^Yapamadım|yok|izin/i.test(rs)))r+=(r?' ':'')+rs}}return r||'Tamam.'}
 async function srvRoute(text){
   if(!srvOn())return MAILW.test(text)?'Mail göndermek için sunucu bağlı olmalı. Ayarlardan sunucu şifresini gir.':null;
   const isTask=TASKRX.test(text),isSrv=MAILW.test(text)||(SRVRX.test(text)&&!/(aç|açsana|açar mısın|başlat)\s*$/.test(text.trim()))||(srvPend&&YESRX.test(text.trim()));
-  if(!isTask&&!isSrv)return null;
+  if(!isTask&&!isSrv){if(navigator.onLine===false)return null;try{return await srvChat(text)}catch(e){if(/şifresi/.test(e.message))return e.message;log('s','Sunucuya ulaşamadım ('+e.message+'), telefondaki beyni deniyorum.');return null}}
   if(navigator.onLine===false){queueTask(text);return 'İnternet yok. İşi telefona kaydettim, bağlanınca sunucuya gönderip başlayacağım. Mail gibi önemli şey varsa göndermeden önce sana soracağım.'}
   try{
     if(isTask){await srvCall('/tasks',{text});return 'Görevi sunucuya verdim, arka planda yapacağım. Önemli bir şey çıkarsa sana soracağım.'}
