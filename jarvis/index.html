@@ -67,7 +67,7 @@ body.mini #mini{display:block;position:fixed;left:10px;right:10px;bottom:12px;he
 <div class="sw"><span>Hep sessizce dinle ("Jarvis" deyince cevaplar)</span><input type="checkbox" id="always"></div>
 <div class="sw"><span>Her konuşmama cevap ver (Jarvis demeden)</span><input type="checkbox" id="all"></div>
 <div class="sw"><span>Kamera önizleme</span><input type="checkbox" id="prev" checked></div>
-<label>Picovoice anahtarı ("Jarvis" kelimesi için)</label><input type="password" id="kP" autocomplete="off" placeholder="Picovoice AccessKey">
+<input type="hidden" id="kP">
 <div class="sw"><span>Başka ekrandayken "Jarvis" deyince panel aç</span><input type="checkbox" id="wake"></div>
 <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="bOv" style="flex:1">üstte göster izni</button><button class="btn" id="bBat" style="flex:1">pil izni</button></div>
 <small id="wInfo"></small>
@@ -88,7 +88,7 @@ function log(c,h){if(MINI){if(c==='u')$('mu').textContent=String(h).replace(/^�
   const d=document.createElement('div');d.className=c;if(h&&h.html)d.innerHTML=h.html;else d.textContent=h;$('log').appendChild(d);$('log').scrollTop=1e9;while($('log').children.length>40)$('log').firstChild.remove()}
 function msg(t,ms=4000){const e=$('msg');e.textContent=t;clearTimeout(msg.h);if(t)msg.h=setTimeout(()=>e.textContent='',ms)}
 const sp=$('set');async function wakeInfo(){const J=PL('JarvisView');if(!NATIVE||!J){$('wInfo').textContent='Bu özellik sadece Android uygulamasında.';return}try{const r=await J.wakeState();$('wInfo').textContent='Dinleme: '+(r.running?'açık':'kapalı')+' · Üstte göster izni: '+(r.overlay?'var':'YOK')+' · Pil izni: '+(r.battery?'var':'YOK')+(r.error?' · Hata: '+r.error:'')}catch(e){$('wInfo').textContent=''}}
-async function applyWake(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{if(S.wake&&S.kP){await ensurePerms();await J.wakeStart({key:S.kP})}else await J.wakeStop()}catch(e){log('s','Dinleme servisi: '+(e&&e.message||e))}setTimeout(wakeInfo,1200)}
+async function applyWake(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{if(S.wake){await ensurePerms();await J.wakeStart({key:S.kP})}else await J.wakeStop()}catch(e){log('s','Dinleme servisi: '+(e&&e.message||e))}setTimeout(wakeInfo,1200)}
 function openSet(v){sp.classList.toggle('on',v===undefined?!sp.classList.contains('on'):v);if(sp.classList.contains('on')){$('kG').value=S.kG;$('kD').value=S.kD;$('eng').value=S.eng;$('fast').checked=S.fast;$('vo').value=S.vo;$('vn').value=S.vn;$('always').checked=S.always;$('kP').value=S.kP;$('wake').checked=S.wake;wakeInfo();$('all').checked=S.all;$('prev').checked=S.prev}}
 $('bSet').onclick=()=>openSet();$('bSet2').onclick=()=>openSet(true);
 $('bOv').onclick=()=>{try{PL('JarvisView').overlayPerm()}catch(e){}};$('bBat').onclick=()=>{try{PL('JarvisView').batteryOpt()}catch(e){}};
@@ -509,7 +509,7 @@ $('go').onclick=async()=>{
 };
 if(!SR&&!NATIVE)$('bMic').style.display='none';
 function closePanel(){stopSpeech();stopRec();try{PL('JarvisView').finish()}catch(e){}}
-async function initMode(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{const r=await J.mode();if(r&&r.mode==='mini'){MINI=true;document.body.classList.add('mini');$('start').style.display='none';started=true;conv=true;setConv();lastAct=Date.now();setInterval(()=>{if(!busy&&!speaking&&Date.now()-lastAct>10000)closePanel()},1000);setTimeout(()=>say('Dinliyorum.'),250)}else{if(S.wake&&S.kP)applyWake()}}catch(e){}}
+async function initMode(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{const r=await J.mode();if(r&&r.mode==='mini'){MINI=true;document.body.classList.add('mini');$('start').style.display='none';started=true;conv=true;setConv();lastAct=Date.now();setInterval(()=>{if(!busy&&!speaking&&Date.now()-lastAct>10000)closePanel()},1000);setTimeout(()=>say('Dinliyorum.'),250)}else{if(S.wake)applyWake()}}catch(e){}}
 initMode();
 window.__jv={feed(h,t){procHands(h,t)},get st(){return{conv,exT,yawT,zoomT,pitchT,holoT,glabel}},holo(v){holoName='armor';holoT=v;holoA=v;exT=0}};
 </script>

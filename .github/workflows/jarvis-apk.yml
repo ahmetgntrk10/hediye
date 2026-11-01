@@ -474,6 +474,12 @@ jobs:
         working-directory: jarvis-app
         run: |
           D=android/app/src/main/java/com/tapverse/jarvis
+          mkdir -p android/app/src/main/assets
+          curl -fsSL -o vm.zip https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+          unzip -q vm.zip -d vm
+          rm -rf android/app/src/main/assets/model
+          mv vm/vosk-model-small-en-us-0.15 android/app/src/main/assets/model
+          echo "jarvis kelimesi modelde:"; grep -c -w "jarvis" android/app/src/main/assets/model/graph/words.txt || true
           cat > $D/WakeService.java <<'JAVA'
           package com.tapverse.jarvis;
           import android.app.Notification;
@@ -484,27 +490,87 @@ jobs:
           import android.content.Context;
           import android.content.Intent;
           import android.content.pm.ServiceInfo;
+          import android.content.res.AssetManager;
           import android.os.Build;
           import android.os.IBinder;
           import androidx.core.app.NotificationCompat;
-          import ai.picovoice.porcupine.Porcupine;
-          import ai.picovoice.porcupine.PorcupineManager;
-          import ai.picovoice.porcupine.PorcupineManagerCallback;
-          public class WakeService extends Service {
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.io.OutputStream;
+          import org.vosk.Model;
+          import org.vosk.Recognizer;
+          import org.vosk.android.RecognitionListener;
+          import org.vosk.android.SpeechService;
+          public class WakeService extends Service implements RecognitionListener {
             static WakeService inst;
             static boolean running = false;
             static String lastError = "";
-            private PorcupineManager pm;
+            private Model model;
+            private SpeechService ss;
             private boolean paused = false;
+            private boolean loading = false;
+            private long lastWake = 0;
             static void setPaused(boolean p) {
               if (inst != null) inst.pause(p);
             }
             void pause(boolean p) {
               paused = p;
-              if (pm == null) return;
+              if (p) stopListen(); else startListen();
+            }
+            private synchronized void stopListen() {
+              try { if (ss != null) { ss.stop(); ss.shutdown(); } } catch (Exception e) {}
+              ss = null;
+            }
+            private synchronized void startListen() {
+              if (model == null || paused || ss != null) return;
               try {
-                if (p) pm.stop(); else pm.start();
-              } catch (Exception e) { lastError = String.valueOf(e.getMessage()); }
+                Recognizer rec = new Recognizer(model, 16000.0f, "[\"jarvis\", \"service\", \"[unk]\"]");
+                ss = new SpeechService(rec, 16000.0f);
+                ss.startListening(this);
+                running = true;
+                lastError = "";
+              } catch (Exception e) {
+                running = false;
+                lastError = "dinleme başlamadı: " + e.getMessage();
+              }
+            }
+            private void copyAssets(AssetManager am, String from, File to) throws Exception {
+              String[] list = am.list(from);
+              if (list != null && list.length > 0) {
+                to.mkdirs();
+                for (String n : list) copyAssets(am, from + "/" + n, new File(to, n));
+              } else {
+                InputStream in = am.open(from);
+                OutputStream out = new FileOutputStream(to);
+                byte[] buf = new byte[65536];
+                int r;
+                while ((r = in.read(buf)) > 0) out.write(buf, 0, r);
+                out.close();
+                in.close();
+              }
+            }
+            private void loadModel() {
+              if (model != null || loading) return;
+              loading = true;
+              new Thread(new Runnable() {
+                public void run() {
+                  try {
+                    File dir = new File(getFilesDir(), "vosk-model");
+                    File ok = new File(dir, "ok.flag");
+                    if (!ok.exists()) {
+                      copyAssets(getAssets(), "model", dir);
+                      new FileOutputStream(ok).close();
+                    }
+                    model = new Model(dir.getAbsolutePath());
+                    startListen();
+                  } catch (Throwable e) {
+                    running = false;
+                    lastError = "model yüklenmedi: " + e.getMessage();
+                  }
+                  loading = false;
+                }
+              }).start();
             }
             @Override
             public IBinder onBind(Intent i) { return null; }
@@ -540,31 +606,22 @@ jobs:
                 stopSelf();
                 return START_NOT_STICKY;
               }
-              if (pm == null) {
-                String key = getSharedPreferences("jarvis", Context.MODE_PRIVATE).getString("pv", "");
-                try {
-                  pm = new PorcupineManager.Builder()
-                    .setAccessKey(key)
-                    .setKeyword(Porcupine.BuiltInKeyword.JARVIS)
-                    .setSensitivity(0.65f)
-                    .build(getApplicationContext(), new PorcupineManagerCallback() {
-                      @Override
-                      public void invoke(int keywordIndex) { onWake(); }
-                    });
-                  pm.start();
-                  running = true;
-                  lastError = "";
-                } catch (Exception e) {
-                  running = false;
-                  lastError = String.valueOf(e.getMessage());
-                  stopSelf();
-                  return START_NOT_STICKY;
-                }
-              }
+              running = true;
+              lastError = "";
+              if (model == null) loadModel(); else startListen();
               return START_STICKY;
             }
+            private void check(String json) {
+              if (paused || json == null) return;
+              String t = json.toLowerCase();
+              if (t.contains("jarvis") || t.contains("service")) {
+                long now = System.currentTimeMillis();
+                if (now - lastWake < 2500) return;
+                lastWake = now;
+                onWake();
+              }
+            }
             private void onWake() {
-              if (paused) return;
               pause(true);
               try {
                 Intent i = new Intent(this, OverlayActivity.class);
@@ -575,12 +632,16 @@ jobs:
                 pause(false);
               }
             }
+            @Override public void onPartialResult(String h) { check(h); }
+            @Override public void onResult(String h) { check(h); }
+            @Override public void onFinalResult(String h) { check(h); }
+            @Override public void onError(Exception e) { lastError = "ses hatası: " + e.getMessage(); }
+            @Override public void onTimeout() {}
             @Override
             public void onDestroy() {
-              try {
-                if (pm != null) { pm.stop(); pm.delete(); }
-              } catch (Exception e) {}
-              pm = null;
+              stopListen();
+              try { if (model != null) model.close(); } catch (Exception e) {}
+              model = null;
               running = false;
               inst = null;
               super.onDestroy();
@@ -633,10 +694,10 @@ jobs:
           p='android/app/build.gradle'
           s=open(p).read()
           assert 'dependencies {' in s
-          s=s.replace('dependencies {',"dependencies {\n    implementation 'ai.picovoice:porcupine-android:3.0.+'",1)
+          s=s.replace('dependencies {',"dependencies {\n    implementation 'com.alphacephei:vosk-android:0.3.47'",1)
           open(p,'w').write(s)
           PY
-          grep -n "porcupine" android/app/build.gradle
+          grep -n "vosk" android/app/build.gradle
           grep -n "OverlayActivity\|WakeService" $M
 
       - name: Surum ve sabit imza
