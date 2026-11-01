@@ -254,13 +254,13 @@ async function ask(text,h,img,web){
   if(!tried)throw new Error('Anahtar girilmemiş. Sağ üstten "ayar"a dokun.');throw last||new Error('cevap alınamadı');
 }
 /* ---------- sunucu (Jarvis beyni) ---------- */
-const MAILW=/((e-?posta|e-?mail|mail)\w*.*(yaz|gönder|\bat\b|yolla|cevapla)|(yaz|gönder|yolla)\w*.*(e-?posta|e-?mail|mail))/i;
-const SRVRX=/(e-?posta|e-?mail|mail|gmail|hatırla\b|hatırlıyor musun|aklında tut|unutma|hafızana|hafızanda)/i;
+const MAILW=/((e[- ]?posta|e[- ]?mail|mail)\w*.*(yaz|gönder|\bat\b|yolla|cevapla)|(yaz|gönder|yolla)\w*.*(e[- ]?posta|e[- ]?mail|mail))/i;
+const SRVRX=/(e[- ]?posta|e[- ]?mail|mail|gmail|hatırla\b|hatırlıyor musun|aklında tut|unutma|hafızana|hafızanda)/i;
 const TASKRX=/(arka planda|ben yokken|ben dönene kadar|görev (ver|ekle|olarak)|sonra yap|internet gelince)/i;
 const YESRX=/^(evet|tamam|onay(la)?|gönder|yolla|olur|aynen|doğru|yap|hayır|hayir|vazgeç|iptal|gönderme|yapma|olmaz|dur)\b/i;
 let srvPend=false,srvSeen={};
 const srvOn=()=>!!(S.sU&&S.sT);
-function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 20:30 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
+function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 20:40 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
 async function srvCall(path,body,get){const url=S.sU.replace(/\/+$/,'')+path,headers={'Authorization':'Bearer '+S.sT,'Content-Type':'application/json'};const H=NATIVE&&PL('CapacitorHttp');
   if(H){const r=await(get?H.get({url,headers,connectTimeout:15000,readTimeout:70000}):H.post({url,headers,data:body,connectTimeout:15000,readTimeout:70000}));if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(r.status>=400)throw new Error('sunucu '+r.status);return typeof r.data==='string'?JSON.parse(r.data):r.data}
   const r=await tfetch(url,{method:get?'GET':'POST',headers,body:get?undefined:JSON.stringify(body)},70000);if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(!r.ok)throw new Error('sunucu '+r.status);return r.json()}
