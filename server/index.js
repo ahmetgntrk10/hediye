@@ -141,6 +141,7 @@ async function decide(id, ok) {
 /* ---------- sunucu ---------- */
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+app.use((req, res, next) => { res.set({ 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization,content-type', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS' }); if (req.method === 'OPTIONS') return res.sendStatus(204); next(); });
 const auth = (req, res, next) => {
   const h = req.headers.authorization || '';
   if (h === 'Bearer ' + TOKEN) return next();

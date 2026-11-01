@@ -68,6 +68,9 @@ body.mini #mini{display:block;position:fixed;left:10px;right:10px;bottom:12px;he
 <div class="sw"><span>Her konuşmama cevap ver (Jarvis demeden)</span><input type="checkbox" id="all"></div>
 <div class="sw"><span>Kamera önizleme</span><input type="checkbox" id="prev" checked></div>
 <input type="hidden" id="kP">
+<label>Jarvis sunucusu adresi</label><input type="text" id="sU" autocomplete="off" placeholder="https://jarvis.gnturk.com">
+<label>Sunucu şifresi (JARVIS_TOKEN)</label><input type="password" id="sT" autocomplete="off">
+<small id="sSt"></small>
 <div class="sw"><span>Başka ekrandayken "Hey asistan" deyince panel aç</span><input type="checkbox" id="wake"></div>
 <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="bOv" style="flex:1">üstte göster izni</button><button class="btn" id="bBat" style="flex:1">pil izni</button></div>
 <div style="margin-top:8px"><div class="sw"><span>Gelen mesajları ve cevapsız aramaları kendiliğinden sesli oku</span><input type="checkbox" id="nr"></div>
@@ -86,7 +89,7 @@ body.mini #mini{display:block;position:fixed;left:10px;right:10px;bottom:12px;he
 const CAP=window.Capacitor,NATIVE=!!(CAP&&CAP.isNativePlatform&&CAP.isNativePlatform()),PL=n=>{try{return(CAP.Plugins&&CAP.Plugins[n])||(CAP.registerPlugin&&CAP.registerPlugin(n))||null}catch(e){return null}};
 const $=id=>document.getElementById(id),clamp=(v,a,b)=>v<a?a:v>b?b:v,TAU=Math.PI*2;
 const store={get(k,d){try{const v=localStorage.getItem('jv_'+k);return v===null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('jv_'+k,JSON.stringify(v))}catch(e){}}};
-const S={kG:store.get('kG',''),kD:store.get('kD',''),eng:store.get('eng','auto'),fast:store.get('fast2',true),vo:store.get('vo','phone'),vn:store.get('vn','Kore'),always:store.get('always2',NATIVE),kP:store.get('kP',''),wake:store.get('wake',false),nr:store.get('nr',false),nh:store.get('nh',true),spk:store.get('spk',false),all:store.get('all',false),prev:store.get('prev',true)};
+const S={kG:store.get('kG',''),kD:store.get('kD',''),eng:store.get('eng','auto'),fast:store.get('fast2',true),vo:store.get('vo','phone'),vn:store.get('vn','Kore'),always:store.get('always2',NATIVE),kP:store.get('kP',''),wake:store.get('wake',false),nr:store.get('nr',false),nh:store.get('nh',true),spk:store.get('spk',false),all:store.get('all',false),prev:store.get('prev',true),sU:store.get('sU','https://jarvis.gnturk.com'),sT:store.get('sT','')};
 let conv=false,state='idle',started=false,speaking=false,awake=false,hist=[],lastHand=0,rot=0,rotT=0,zoom=1,zoomT=1,lvl=0;
 /* ---------- UI ---------- */
 function setState(s,t){state=s;$('state').textContent=t||({idle:'beklemede',listen:'dinliyorum',think:'düşünüyorum',speak:'konuşuyorum'}[s]||s)}
@@ -96,14 +99,14 @@ function log(c,h){if(MINI){if(c==='u')$('mu').textContent=String(h).replace(/^�
 function msg(t,ms=4000){const e=$('msg');e.textContent=t;clearTimeout(msg.h);if(t)msg.h=setTimeout(()=>e.textContent='',ms)}
 const sp=$('set');async function wakeInfo(){const J=PL('JarvisView');if(!NATIVE||!J){$('wInfo').textContent='Bu özellik sadece Android uygulamasında.';return}try{const r=await J.wakeState();let ac=false;try{ac=await accOn()}catch(e){}$('wInfo').textContent='Telefon kontrolü: '+(ac?'açık':'YOK')+' · Dinleme: '+(r.running?'açık':'kapalı')+' · Üstte göster izni: '+(r.overlay?'var':'YOK')+' · Pil izni: '+(r.battery?'var':'YOK')+(r.error?' · Hata: '+r.error:'')+(r.saved?' · Kayıtlı ses: '+r.saved:'')+' · Duyduğu: '+(r.heard||'-')}catch(e){$('wInfo').textContent=''}}
 async function applyWake(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{await J.spkOnly({on:!!S.spk});try{await J.notifRead({on:!!S.nr,headset:!!S.nh})}catch(e){}if(S.wake){await ensurePerms();await J.wakeStart({key:S.kP})}else await J.wakeStop()}catch(e){log('s','Dinleme servisi: '+(e&&e.message||e))}setTimeout(wakeInfo,1200)}
-function openSet(v){sp.classList.toggle('on',v===undefined?!sp.classList.contains('on'):v);if(sp.classList.contains('on')){$('kG').value=S.kG;$('kD').value=S.kD;$('eng').value=S.eng;$('fast').checked=S.fast;$('vo').value=S.vo;$('vn').value=S.vn;$('always').checked=S.always;$('kP').value=S.kP;$('wake').checked=S.wake;$('spk').checked=S.spk;$('nr').checked=S.nr;$('nh').checked=S.nh;wakeInfo();$('all').checked=S.all;$('prev').checked=S.prev}}
+function openSet(v){sp.classList.toggle('on',v===undefined?!sp.classList.contains('on'):v);if(sp.classList.contains('on')){$('kG').value=S.kG;$('kD').value=S.kD;$('eng').value=S.eng;$('fast').checked=S.fast;$('vo').value=S.vo;$('vn').value=S.vn;$('always').checked=S.always;$('kP').value=S.kP;$('wake').checked=S.wake;$('spk').checked=S.spk;$('nr').checked=S.nr;$('nh').checked=S.nh;wakeInfo();$('all').checked=S.all;$('prev').checked=S.prev;$('sU').value=S.sU;$('sT').value=S.sT;srvStat()}}
 $('bSet').onclick=()=>openSet();$('bSet2').onclick=()=>openSet(true);
 $('bOv').onclick=()=>{try{PL('JarvisView').overlayPerm()}catch(e){}};let enT=null;
 async function enPoll(){const J=PL('JarvisView');try{const r=await J.wakeState();const n=r.enrollCount||0;$('enInfo').textContent='Öğrenilen: '+n+'/8'+(n<3?' · normal sesinle "hey asistan" de':n<5?' · şimdi ince/kısık sesle':n<8?' · şimdi kalın sesle':'')+(r.error?' · '+r.error:'');if(n>=8){clearInterval(enT);enT=null;await J.enroll({on:false});$('enInfo').textContent='Ses öğrenildi ('+n+' örnek). "Sadece benim sesimde aç"ı işaretleyip kaydet.'}}catch(e){}}
 $('bEn').onclick=async()=>{const J=PL('JarvisView');if(!NATIVE||!J)return;if(!S.kP&&false)return;try{await ensurePerms();await J.wakeStart({key:''});await J.enroll({on:true})}catch(e){}$('wake').checked=true;S.wake=true;store.set('wake',true);clearInterval(enT);enT=setInterval(enPoll,1000);enPoll()};
 $('bEc').onclick=async()=>{try{await PL('JarvisView').enroll({on:false});await PL('JarvisView').spkOnly({clear:true})}catch(e){}$('spk').checked=false;S.spk=false;store.set('spk',false);clearInterval(enT);$('enInfo').textContent='Ses kaydı silindi.'};
 $('bNo').onclick=()=>{try{PL('JarvisView').notifSettings()}catch(e){}};$('bAc').onclick=()=>{try{PL('JarvisView').accSettings()}catch(e){}};$('bAs').onclick=()=>{try{PL('JarvisView').assistSettings()}catch(e){}};$('bBat').onclick=()=>{try{PL('JarvisView').batteryOpt()}catch(e){}};
-$('sSave').onclick=()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;S.vo=$('vo').value;S.vn=$('vn').value;S.always=$('always').checked;S.kP=$('kP').value.trim();S.wake=$('wake').checked;S.spk=$('spk').checked;S.nr=$('nr').checked;S.nh=$('nh').checked;S.all=$('all').checked;S.prev=$('prev').checked;for(const k in S)store.set(k==='fast'?'fast2':k==='always'?'always2':k,S[k]);openSet(false);$('cam').classList.toggle('on',S.prev&&camOn);models={};if(started)applyListen();applyWake()};
+$('sSave').onclick=()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;S.vo=$('vo').value;S.vn=$('vn').value;S.always=$('always').checked;S.kP=$('kP').value.trim();S.wake=$('wake').checked;S.spk=$('spk').checked;S.nr=$('nr').checked;S.nh=$('nh').checked;S.all=$('all').checked;S.prev=$('prev').checked;S.sU=$('sU').value.trim();S.sT=$('sT').value.trim();for(const k in S)store.set(k==='fast'?'fast2':k==='always'?'always2':k,S[k]);openSet(false);$('cam').classList.toggle('on',S.prev&&camOn);models={};if(started)applyListen();applyWake()};
 $('sTest').onclick=async()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;models={};$('sInfo').textContent='test ediliyor…';try{const r=await ask('Sadece "tamam" de.',[]);$('sInfo').textContent='Çalıştı ('+r.engine+' · '+r.model+'): '+r.text}catch(e){$('sInfo').textContent='Hata: '+e.message}};
 /* ---------- speech out ---------- */
 let voice=null;function pickVoice(){const v=speechSynthesis.getVoices();voice=v.find(x=>/^tr/i.test(x.lang)&&/(google|neural|premium|enhanced)/i.test(x.name))||v.find(x=>/^tr/i.test(x.lang))||null}
@@ -238,6 +241,31 @@ async function ask(text,h,img,web){
   for(const o of order){if(o==='g'&&!S.kG||o==='d'&&!S.kD)continue;tried++;try{return o==='g'?await viaGemini(text,h,img,web):await viaDeep(text,h)}catch(e){last=e;if(o==='g')models.g=null;else models.d=null}}
   if(!tried)throw new Error('Anahtar girilmemiş. Sağ üstten "ayar"a dokun.');throw last||new Error('cevap alınamadı');
 }
+/* ---------- sunucu (Jarvis beyni) ---------- */
+const SRVRX=/(e-?posta|e-?mail|\bmail\b|gmail|hatırla\b|hatırlıyor musun|aklında tut|unutma|hafızana|hafızanda)/i;
+const TASKRX=/(arka planda|ben yokken|ben dönene kadar|görev (ver|ekle|olarak)|sonra yap|internet gelince)/i;
+const YESRX=/^(evet|tamam|onay(la)?|gönder|yolla|olur|aynen|doğru|yap|hayır|hayir|vazgeç|iptal|gönderme|yapma|olmaz|dur)\b/i;
+let srvPend=false,srvSeen={};
+const srvOn=()=>!!(S.sU&&S.sT);
+function srvStat(){const e=$('sSt');if(!e)return;e.textContent=srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.'}
+async function srvCall(path,body,get){const url=S.sU.replace(/\/+$/,'')+path,headers={'Authorization':'Bearer '+S.sT,'Content-Type':'application/json'};const H=NATIVE&&PL('CapacitorHttp');
+  if(H){const r=await(get?H.get({url,headers,connectTimeout:15000,readTimeout:70000}):H.post({url,headers,data:body,connectTimeout:15000,readTimeout:70000}));if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(r.status>=400)throw new Error('sunucu '+r.status);return typeof r.data==='string'?JSON.parse(r.data):r.data}
+  const r=await tfetch(url,{method:get?'GET':'POST',headers,body:get?undefined:JSON.stringify(body)},70000);if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(!r.ok)throw new Error('sunucu '+r.status);return r.json()}
+function queueTask(t){const q=store.get('queue',[]);q.push(t);store.set('queue',q);srvStat()}
+async function syncQueue(){const q=store.get('queue',[]);if(!q.length||!srvOn()||navigator.onLine===false)return;try{await srvCall('/tasks',{tasks:q});store.set('queue',[]);srvStat();log('s',q.length+' bekleyen görev sunucuya gönderildi, başlıyor.');return q.length}catch(e){log('s','Görevler gönderilemedi: '+e.message)}}
+async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);return o.reply||'Cevap gelmedi.'}
+async function srvRoute(text){
+  if(!srvOn())return null;
+  const isTask=TASKRX.test(text),isSrv=SRVRX.test(text)||(srvPend&&YESRX.test(text.trim()));
+  if(!isTask&&!isSrv)return null;
+  if(navigator.onLine===false){queueTask(text);return 'İnternet yok. İşi telefona kaydettim, bağlanınca sunucuya gönderip başlayacağım. Mail gibi önemli şey varsa göndermeden önce sana soracağım.'}
+  try{
+    if(isTask){await srvCall('/tasks',{text});return 'Görevi sunucuya verdim, arka planda yapacağım. Önemli bir şey çıkarsa sana soracağım.'}
+    return await srvChat(text);
+  }catch(e){if(/şifresi/.test(e.message))return e.message;queueTask(text);return 'Sunucuya ulaşamadım ('+e.message+'). İşi sıraya aldım, bağlanınca göndereceğim.'}
+}
+async function srvPoll(){if(!srvOn()||navigator.onLine===false)return;try{await syncQueue();const a=await srvCall('/approvals',null,true);const fresh=(a||[]).filter(x=>!srvSeen[x.id]);if(fresh.length){fresh.forEach(x=>srvSeen[x.id]=1);srvPend=true;const m='Onayını bekleyen iş var: '+fresh[0].summary+'. Yapayım mı? Evet ya da hayır de.';log('j',m);if(!MINI&&!busy)say(m)}}catch(e){}}
+function srvBoot(){srvStat();window.addEventListener('online',()=>{setTimeout(srvPoll,1500)});setTimeout(srvPoll,4000);setInterval(srvPoll,120000)}
 /* ---------- main flow ---------- */
 let busy=false;
 const WEBQ=/bugün|şu an|şimdi|güncel|haber|son dakika|kimdir|fiyat|kur\b|dolar|euro|altın|maç|skor|hava|ne zaman|kaç tl|araştır|internet|piyasa|borsa|bitcoin|son durum|yeni çıkan|2025|2026/i;
@@ -247,6 +275,7 @@ async function run(text){
     let r;if(RESTRICT&&/\b(ara|arar|arama|mesaj|whatsapp|sms|aç|kapat|alarm|rehber|kişi|kişisi|fener|ses|yaz|gönder|uygulama|kameray)\w*/i.test(text))r='Telefon kilitliyken bunu yapmam. Önce kilidi aç.';else r=await local(text);
     if(r===''){clearInterval(iv);busy=false;setState('idle');if(conv||S.always)setTimeout(listenOnce,250);return}
     if(r){log('j',r);hist.push({r:'u',t:text},{r:'a',t:r});busy=false;await say(r);return}
+    {const sv=await srvRoute(text);if(sv!==null){hist.push({r:'u',t:text},{r:'a',t:sv});log('j',sv);clearInterval(iv);busy=false;await say(sv);return}}
     let img=null;if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&camOn)img=grab();
     if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&!img)throw new Error('Kamera kapalı.');
     const a=await ask(text,hist.slice(-12),img,WEBQ.test(text));
@@ -574,7 +603,7 @@ let pd=null,moved=false;cv.addEventListener('pointerdown',e=>{pd={x:e.clientX,y:
 $('go').onclick=async()=>{
   $('start').style.display='none';started=true;setState('idle');
   try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(' ');u.volume=0;speechSynthesis.speak(u)}catch(e){}
-  log('s','JARVIS çevrimiçi.');if(!S.kG&&!S.kD){log('s','Önce sağ üstten "ayar" → anahtarlarını gir.')}
+  log('s','JARVIS çevrimiçi.');srvBoot();if(!S.kG&&!S.kD){log('s','Önce sağ üstten "ayar" → anahtarlarını gir.')}
   try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}if(NATIVE&&PL('SpeechRecognition')){try{await PL('SpeechRecognition').requestPermissions()}catch(e){}}
   if(NATIVE&&PL('JarvisView'))ensurePerms();
   hstat('kamera kapalı');applyListen();
