@@ -444,6 +444,10 @@ jobs:
               r.put("heard", WakeService.heard + " #" + WakeService.events);
               r.put("error", WakeService.lastError == null ? "" : WakeService.lastError);
               r.put("overlay", Settings.canDrawOverlays(getContext()));
+              r.put("enrolling", WakeService.enrolling);
+              r.put("enrollCount", WakeService.enrollCount);
+              r.put("dist", WakeService.lastDist);
+              try { r.put("spkOnly", getContext().getSharedPreferences("jarvis", Context.MODE_PRIVATE).getBoolean("spkOnly", false)); r.put("saved", new org.json.JSONArray(getContext().getSharedPreferences("jarvis", Context.MODE_PRIVATE).getString("spk", "[]")).length()); } catch (Exception e) {}
               PowerManager pw = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
               r.put("battery", pw.isIgnoringBatteryOptimizations(getContext().getPackageName()));
               call.resolve(r);
@@ -472,6 +476,21 @@ jobs:
                 r.put("locked", km.isKeyguardLocked());
               } catch (Exception e) { r.put("locked", false); }
               call.resolve(r);
+            }
+            @PluginMethod
+            public void enroll(PluginCall call) {
+              boolean on = call.getBoolean("on", false);
+              WakeService.enrolling = on;
+              if (on) WakeService.enrollCount = 0;
+              if (on) getContext().getSharedPreferences("jarvis", Context.MODE_PRIVATE).edit().putString("spk", "[]").apply();
+              call.resolve();
+            }
+            @PluginMethod
+            public void spkOnly(PluginCall call) {
+              SharedPreferences sp = getContext().getSharedPreferences("jarvis", Context.MODE_PRIVATE);
+              if (call.getBoolean("clear", false)) { sp.edit().putString("spk", "[]").putBoolean("spkOnly", false).apply(); WakeService.enrollCount = 0; }
+              else sp.edit().putBoolean("spkOnly", call.getBoolean("on", false)).apply();
+              call.resolve();
             }
             @PluginMethod
             public void accState(PluginCall call) {
@@ -533,6 +552,10 @@ jobs:
           unzip -q vm.zip -d vm
           rm -rf android/app/src/main/assets/model
           mv vm/vosk-model-small-en-us-0.15 android/app/src/main/assets/model
+          curl -fsSL -o spk.zip https://alphacephei.com/vosk/models/vosk-model-spk-0.4.zip
+          unzip -q spk.zip -d spk
+          rm -rf android/app/src/main/assets/spk
+          mv spk/vosk-model-spk-0.4 android/app/src/main/assets/spk
           echo "jarvis kelimesi modelde:"; grep -c -w "jarvis" android/app/src/main/assets/model/graph/words.txt || true
           cat > $D/WakeService.java <<'JAVA'
           package com.tapverse.jarvis;
@@ -543,6 +566,7 @@ jobs:
           import android.app.Service;
           import android.content.Context;
           import android.content.Intent;
+          import android.content.SharedPreferences;
           import android.content.pm.ServiceInfo;
           import android.content.res.AssetManager;
           import android.os.Build;
@@ -553,6 +577,9 @@ jobs:
           import java.io.InputStream;
           import java.io.OutputStream;
           import org.vosk.Model;
+          import org.vosk.SpeakerModel;
+          import org.json.JSONArray;
+          import org.json.JSONObject;
           import org.vosk.Recognizer;
           import org.vosk.android.RecognitionListener;
           import org.vosk.android.SpeechService;
@@ -563,6 +590,10 @@ jobs:
             static String heard = "";
             static int events = 0;
             private Model model;
+            private SpeakerModel spk;
+            static boolean enrolling = false;
+            static int enrollCount = 0;
+            static String lastDist = "";
             private SpeechService ss;
             private boolean paused = false;
             private boolean loading = false;
@@ -582,6 +613,7 @@ jobs:
               if (model == null || paused || ss != null) return;
               try {
                 Recognizer rec = new Recognizer(model, 16000.0f, "[\"hey\", \"hay\", \"assistant\", \"assistance\", \"a system\", \"hey assistant\", \"jarvis\", \"[unk]\"]");
+                if (spk != null) { try { rec.setSpeakerModel(spk); } catch (Throwable e2) {} }
                 ss = new SpeechService(rec, 16000.0f);
                 ss.startListening(this);
                 running = true;
@@ -618,6 +650,15 @@ jobs:
                       copyAssets(getAssets(), "model", dir);
                       new FileOutputStream(ok).close();
                     }
+                    try {
+                      File sdir = new File(getFilesDir(), "vosk-spk");
+                      File sok = new File(sdir, "ok.flag");
+                      if (!sok.exists()) {
+                        copyAssets(getAssets(), "spk", sdir);
+                        new FileOutputStream(sok).close();
+                      }
+                      spk = new SpeakerModel(sdir.getAbsolutePath());
+                    } catch (Throwable e3) { spk = null; lastError = "ses modeli yüklenmedi: " + e3.getMessage(); }
                     model = new Model(dir.getAbsolutePath());
                     startListen();
                   } catch (Throwable e) {
@@ -667,25 +708,70 @@ jobs:
               if (model == null) loadModel(); else startListen();
               return START_STICKY;
             }
+            private double cosDist(double[] a, double[] b) {
+              double d = 0, na = 0, nb = 0;
+              int n = Math.min(a.length, b.length);
+              for (int i = 0; i < n; i++) { d += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+              if (na == 0 || nb == 0) return 2;
+              return 1 - d / (Math.sqrt(na) * Math.sqrt(nb));
+            }
+            private double[] toVec(JSONArray ja) throws Exception {
+              double[] v = new double[ja.length()];
+              for (int i = 0; i < v.length; i++) v[i] = ja.getDouble(i);
+              return v;
+            }
             private void check(String json, boolean partial) {
               if (paused || json == null) return;
               String t = json.toLowerCase();
               events++;
-              String hh = t.replaceAll("[^a-z\\[\\] ]", "").replace("partial", "").replace("text", "").trim();
+              String hh = t.replaceAll("\"spk\"\\s*:\\s*\\[[^\\]]*\\]", "").replaceAll("[^a-z\\[\\] ]", "").replace("partial", "").replace("text", "").replace("spkframes", "").trim();
               if (hh.length() > 0) heard = hh;
               boolean hit = t.contains("jarvis") || ((t.contains("hey") || t.contains("hay")) && (t.contains("assist") || t.contains("a system") || t.contains("asistan")));
-              if (hit && partial) {
+              if (!hit) return;
+              SharedPreferences sp = getSharedPreferences("jarvis", Context.MODE_PRIVATE);
+              boolean spkOnly = sp.getBoolean("spkOnly", false);
+              String stored = sp.getString("spk", "[]");
+              JSONArray all;
+              try { all = new JSONArray(stored); } catch (Exception e) { all = new JSONArray(); }
+              if (enrolling) {
+                if (partial) return;
+                try {
+                  JSONObject o = new JSONObject(json);
+                  JSONArray v = o.optJSONArray("spk");
+                  if (v == null) { lastError = "ses izi alınamadı, tekrar söyle"; return; }
+                  all.put(v);
+                  sp.edit().putString("spk", all.toString()).apply();
+                  enrollCount = all.length();
+                  lastError = "";
+                } catch (Exception e) { lastError = "ses kaydı hatası: " + e.getMessage(); }
+                return;
+              }
+              if (spkOnly && all.length() > 0) {
+                if (partial) return;
+                try {
+                  JSONObject o = new JSONObject(json);
+                  JSONArray v = o.optJSONArray("spk");
+                  if (v == null) { lastError = "ses izi yok, açılmadı"; return; }
+                  double[] cur = toVec(v);
+                  double best = 2;
+                  for (int i = 0; i < all.length(); i++) {
+                    double d = cosDist(cur, toVec(all.getJSONArray(i)));
+                    if (d < best) best = d;
+                  }
+                  lastDist = String.format(java.util.Locale.US, "%.2f", best);
+                  if (best > 0.6) { lastError = "ses tanınmadı (fark " + lastDist + ")"; return; }
+                  lastError = "";
+                } catch (Exception e) { lastError = "ses karşılaştırma hatası: " + e.getMessage(); return; }
+              } else if (partial) {
                 try {
                   android.media.AudioManager am = (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
-                  if (am != null && am.isMusicActive()) hit = false;
+                  if (am != null && am.isMusicActive()) return;
                 } catch (Exception e) {}
               }
-              if (hit) {
-                long now = System.currentTimeMillis();
-                if (now - lastWake < 2500) return;
-                lastWake = now;
-                onWake();
-              }
+              long now = System.currentTimeMillis();
+              if (now - lastWake < 2500) return;
+              lastWake = now;
+              onWake();
             }
             private void onWake() {
               pause(true);
