@@ -83,6 +83,8 @@ body.mini #mini{display:block;position:fixed;left:10px;right:10px;bottom:12px;he
 <small id="wInfo"></small>
 <small>Hızlı mod açıkken hızlı Gemini modeli seçilir ve düşünme kapatılır; cevaplar birkaç saniyede gelir. Haber, fiyat gibi güncel sorularda Gemini otomatik Google'da arar.</small><small>Anahtarlar sadece bu telefonun tarayıcısında saklanır. Model adı yazmana gerek yok, en iyi mevcut model otomatik seçilir.</small>
 <div style="display:flex;gap:8px;margin-top:14px"><button class="btn" id="sTest" style="flex:1">test et</button><button class="btn on" id="sSave" style="flex:1">kaydet</button></div>
+<button class="btn" id="bDx" style="width:100%;margin-top:8px">Tanı çalıştır (sorun nerede?)</button>
+<pre id="dx" style="white-space:pre-wrap;word-break:break-word;font:11px/1.5 var(--mono);color:#9fe8ff;margin:8px 0 0;user-select:text"></pre>
 <small id="sInfo"></small>
 </div>
 <script type="module">
@@ -273,6 +275,16 @@ async function srvRoute(text){
 }
 async function srvPoll(){if(!srvOn()||navigator.onLine===false)return;try{await syncQueue();const a=await srvCall('/approvals',null,true);const fresh=(a||[]).filter(x=>!srvSeen[x.id]);if(fresh.length){fresh.forEach(x=>srvSeen[x.id]=1);srvPend=true;const m='Onayını bekleyen iş var: '+fresh[0].summary+'. Yapayım mı? Evet ya da hayır de.';log('j',m);if(!MINI&&!busy)say(m)}}catch(e){}}
 function srvBoot(){srvStat();window.addEventListener('online',()=>{setTimeout(srvPoll,1500)});setTimeout(srvPoll,4000);setInterval(srvPoll,120000)}
+$('bDx').onclick=async()=>{const o=$('dx');const out=[];const P=()=>{o.textContent=out.join('\n')};
+  const T=async(n,f)=>{out.push('… '+n);P();const i=out.length-1,t0=Date.now();try{const r=await f();out[i]='✓ '+n+' ('+Math.round((Date.now()-t0)/100)/10+'s) '+(r||'')}catch(e){out[i]='✗ '+n+': '+String(e&&e.message||e).slice(0,300)}P()};
+  S.sU=$('sU').value.trim();S.sT=$('sT').value.trim();S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();
+  out.push('İnternet: '+(navigator.onLine===false?'YOK':'var')+' · Uygulama: '+(NATIVE?'telefon':'tarayıcı')+' · HTTP eklentisi: '+(PL('CapacitorHttp')?'var':'yok'));P();
+  await T('Sunucu açık mı',async()=>{const r=await srvCall('/health',null,true);return JSON.stringify(r)});
+  await T('Şifre doğru mu',async()=>{const r=await srvCall('/approvals',null,true);return 'tamam, bekleyen onay: '+(r||[]).length});
+  await T('Sunucu beyni (Gemini)',async()=>{const r=await srvCall('/chat',{text:'Sadece "tamam" de.',history:[]});return String(r.reply).slice(0,80)});
+  await T('Telefondaki Gemini',async()=>{const r=await ask('Sadece "tamam" de.',[]);return r.engine+' · '+r.model});
+  if(NATIVE){const J=PL('JarvisView');await T('Telefon eklentisi',async()=>{const r=await J.wakeState();return 'Erişilebilirlik: '+(await J.accState().then(x=>JSON.stringify(x)).catch(e=>'?'))})}
+  out.push('Bitti. Bu yazıların ekran görüntüsünü gönder.');P()};
 /* ---------- main flow ---------- */
 let busy=false;
 const WEBQ=/bugün|şu an|şimdi|güncel|haber|son dakika|kimdir|fiyat|kur\b|dolar|euro|altın|maç|skor|hava|ne zaman|kaç tl|araştır|internet|piyasa|borsa|bitcoin|son durum|yeni çıkan|2025|2026/i;
@@ -554,7 +566,7 @@ async function execAct(a){const J=PL('JarvisView');if(!J||!a)return'';try{switch
   case'open':{const r=await J.openApp({name:a.app||''});if(r&&r.ok)return r.label+' açılıyor.';return await agent((a.app||'')+' uygulamasını bul ve aç.')}
   case'nav':await J.navigate({q:a.q||''});return'Navigasyon açılıyor.';
   case'settings':await J.settings({page:a.page||''});return'Ayar sayfasını açtım.';
-  case'agent':return await agent(a.goal||'');}}catch(e){return'Yapamadım: '+String(e&&e.message||e).slice(0,80)}return''}
+  case'agent':return await agent(a.goal||'');}}catch(e){return'Yapamadım: '+String(e&&e.message||e).slice(0,160)}return''}
 function waName(l){return l.replace(/['’]/g,'').split(/\s+/).filter(w=>w&&!/^(whatsapp|vatsap|kişi|numara)/.test(w)&&!/^(sesli|görüntülü|lütfen|bana|şu|bir|diye|olarak|kayıtlı|olan|ara|arar|arasana|arasın|aransın|arama|aramak|istiyorum|mısın|misin|musun|müsün)$/.test(w)).join(' ').trim()}
 async function phoneCmd(l,t){const J=PL('JarvisView');let m;
   if(pend){const P=pend;pend=null;
