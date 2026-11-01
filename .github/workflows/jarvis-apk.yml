@@ -98,10 +98,14 @@ jobs:
           import com.getcapacitor.annotation.Permission;
           import com.getcapacitor.annotation.PermissionCallback;
           import java.util.List;
+          import android.content.SharedPreferences;
+          import android.os.PowerManager;
+          import androidx.core.content.ContextCompat;
           @CapacitorPlugin(name = "JarvisView", permissions = {
             @Permission(alias = "contacts", strings = { Manifest.permission.READ_CONTACTS }),
             @Permission(alias = "call", strings = { Manifest.permission.CALL_PHONE }),
-            @Permission(alias = "sms", strings = { Manifest.permission.SEND_SMS })
+            @Permission(alias = "sms", strings = { Manifest.permission.SEND_SMS }),
+            @Permission(alias = "notif", strings = { "android.permission.POST_NOTIFICATIONS" })
           })
           public class JarvisViewPlugin extends Plugin {
             private WebView wv;
@@ -198,7 +202,7 @@ jobs:
             private Intent newTask(Intent i) { i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); return i; }
             @PluginMethod
             public void perms(PluginCall call) {
-              requestPermissionForAliases(new String[] { "contacts", "call", "sms" }, call, "permsCb");
+              requestPermissionForAliases(new String[] { "contacts", "call", "sms", "notif" }, call, "permsCb");
             }
             @PermissionCallback
             private void permsCb(PluginCall call) {
@@ -405,9 +409,235 @@ jobs:
                 } catch (Exception e2) { fail(call, e2); }
               }
             }
+            @PluginMethod
+            public void mode(PluginCall call) {
+              JSObject r = new JSObject();
+              r.put("mode", getActivity() instanceof OverlayActivity ? "mini" : "main");
+              call.resolve(r);
+            }
+            @PluginMethod
+            public void finish(PluginCall call) {
+              getActivity().finish();
+              call.resolve();
+            }
+            @PluginMethod
+            public void wakeStart(PluginCall call) {
+              try {
+                SharedPreferences sp = getContext().getSharedPreferences("jarvis", Context.MODE_PRIVATE);
+                sp.edit().putString("pv", call.getString("key", "")).apply();
+                ContextCompat.startForegroundService(getContext(), new Intent(getContext(), WakeService.class));
+                call.resolve();
+              } catch (Exception e) { fail(call, e); }
+            }
+            @PluginMethod
+            public void wakeStop(PluginCall call) {
+              try {
+                getContext().stopService(new Intent(getContext(), WakeService.class));
+                call.resolve();
+              } catch (Exception e) { fail(call, e); }
+            }
+            @PluginMethod
+            public void wakeState(PluginCall call) {
+              JSObject r = new JSObject();
+              r.put("running", WakeService.running);
+              r.put("error", WakeService.lastError == null ? "" : WakeService.lastError);
+              r.put("overlay", Settings.canDrawOverlays(getContext()));
+              PowerManager pw = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+              r.put("battery", pw.isIgnoringBatteryOptimizations(getContext().getPackageName()));
+              call.resolve(r);
+            }
+            @PluginMethod
+            public void overlayPerm(PluginCall call) {
+              try {
+                getContext().startActivity(newTask(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getContext().getPackageName()))));
+                call.resolve();
+              } catch (Exception e) { fail(call, e); }
+            }
+            @PluginMethod
+            public void batteryOpt(PluginCall call) {
+              try {
+                Intent i;
+                try {
+                  i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getContext().getPackageName()));
+                  getContext().startActivity(newTask(i));
+                } catch (Exception e1) {
+                  getContext().startActivity(newTask(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)));
+                }
+                call.resolve();
+              } catch (Exception e) { fail(call, e); }
+            }
           }
           JAVA
           sed -i 's/^          //' $D/MainActivity.java $D/JarvisViewPlugin.java
+
+      - name: Jarvis kelimesi servisi ve alt panel
+        working-directory: jarvis-app
+        run: |
+          D=android/app/src/main/java/com/tapverse/jarvis
+          cat > $D/WakeService.java <<'JAVA'
+          package com.tapverse.jarvis;
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.pm.ServiceInfo;
+          import android.os.Build;
+          import android.os.IBinder;
+          import androidx.core.app.NotificationCompat;
+          import ai.picovoice.porcupine.Porcupine;
+          import ai.picovoice.porcupine.PorcupineManager;
+          import ai.picovoice.porcupine.PorcupineManagerCallback;
+          public class WakeService extends Service {
+            static WakeService inst;
+            static boolean running = false;
+            static String lastError = "";
+            private PorcupineManager pm;
+            private boolean paused = false;
+            static void setPaused(boolean p) {
+              if (inst != null) inst.pause(p);
+            }
+            void pause(boolean p) {
+              paused = p;
+              if (pm == null) return;
+              try {
+                if (p) pm.stop(); else pm.start();
+              } catch (Exception e) { lastError = String.valueOf(e.getMessage()); }
+            }
+            @Override
+            public IBinder onBind(Intent i) { return null; }
+            @Override
+            public int onStartCommand(Intent intent, int flags, int startId) {
+              if (intent != null && "STOP".equals(intent.getAction())) {
+                stopSelf();
+                return START_NOT_STICKY;
+              }
+              inst = this;
+              if (Build.VERSION.SDK_INT >= 26) {
+                NotificationChannel ch = new NotificationChannel("jarvis_wake", "Jarvis dinleme", NotificationManager.IMPORTANCE_LOW);
+                ((NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE)).createNotificationChannel(ch);
+              }
+              Intent open = new Intent(this, MainActivity.class);
+              PendingIntent pi = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE);
+              Intent stop = new Intent(this, WakeService.class);
+              stop.setAction("STOP");
+              PendingIntent ps = PendingIntent.getService(this, 1, stop, PendingIntent.FLAG_IMMUTABLE);
+              Notification n = new NotificationCompat.Builder(this, "jarvis_wake")
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setContentTitle("JARVIS hazır")
+                .setContentText("Jarvis diyerek çağır")
+                .setContentIntent(pi)
+                .addAction(0, "Durdur", ps)
+                .setOngoing(true)
+                .build();
+              try {
+                if (Build.VERSION.SDK_INT >= 29) startForeground(7, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+                else startForeground(7, n);
+              } catch (Exception e) {
+                lastError = "servis başlamadı: " + e.getMessage();
+                stopSelf();
+                return START_NOT_STICKY;
+              }
+              if (pm == null) {
+                String key = getSharedPreferences("jarvis", Context.MODE_PRIVATE).getString("pv", "");
+                try {
+                  pm = new PorcupineManager.Builder()
+                    .setAccessKey(key)
+                    .setKeyword(Porcupine.BuiltInKeyword.JARVIS)
+                    .setSensitivity(0.65f)
+                    .build(getApplicationContext(), new PorcupineManagerCallback() {
+                      @Override
+                      public void invoke(int keywordIndex) { onWake(); }
+                    });
+                  pm.start();
+                  running = true;
+                  lastError = "";
+                } catch (Exception e) {
+                  running = false;
+                  lastError = String.valueOf(e.getMessage());
+                  stopSelf();
+                  return START_NOT_STICKY;
+                }
+              }
+              return START_STICKY;
+            }
+            private void onWake() {
+              if (paused) return;
+              pause(true);
+              try {
+                Intent i = new Intent(this, OverlayActivity.class);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+                startActivity(i);
+              } catch (Exception e) {
+                lastError = "panel açılamadı: " + e.getMessage();
+                pause(false);
+              }
+            }
+            @Override
+            public void onDestroy() {
+              try {
+                if (pm != null) { pm.stop(); pm.delete(); }
+              } catch (Exception e) {}
+              pm = null;
+              running = false;
+              inst = null;
+              super.onDestroy();
+            }
+          }
+          JAVA
+          cat > $D/OverlayActivity.java <<'JAVA'
+          package com.tapverse.jarvis;
+          import android.graphics.Color;
+          import android.graphics.drawable.ColorDrawable;
+          import android.os.Bundle;
+          import android.view.Gravity;
+          import android.view.MotionEvent;
+          import android.view.ViewGroup;
+          import android.view.Window;
+          import android.view.WindowManager;
+          import com.getcapacitor.BridgeActivity;
+          public class OverlayActivity extends BridgeActivity {
+            @Override
+            public void onCreate(Bundle b) {
+              registerPlugin(JarvisViewPlugin.class);
+              super.onCreate(b);
+              WakeService.setPaused(true);
+              Window w = getWindow();
+              w.setGravity(Gravity.BOTTOM);
+              int h = (int) (230 * getResources().getDisplayMetrics().density);
+              w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, h);
+              w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+              w.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH);
+              try { getBridge().getWebView().setBackgroundColor(Color.TRANSPARENT); } catch (Exception e) {}
+            }
+            @Override
+            public boolean onTouchEvent(MotionEvent e) {
+              if (e.getAction() == MotionEvent.ACTION_OUTSIDE) { finish(); return true; }
+              return super.onTouchEvent(e);
+            }
+            @Override
+            public void onDestroy() {
+              super.onDestroy();
+              WakeService.setPaused(false);
+            }
+          }
+          JAVA
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#<uses-permission android:name="android.permission.VIBRATE"/>#<uses-permission android:name="android.permission.VIBRATE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/><uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/><uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>#' $M
+          sed -i 's#</application>#<activity android:name=".OverlayActivity" android:theme="@style/OverlayTheme" android:launchMode="singleTask" android:excludeFromRecents="true" android:taskAffinity="" android:exported="false" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"/><service android:name=".WakeService" android:foregroundServiceType="microphone" android:exported="false"/></application>#' $M
+          S=android/app/src/main/res/values/styles.xml
+          sed -i 's#</resources>#<style name="OverlayTheme" parent="Theme.AppCompat.NoActionBar"><item name="android:windowIsTranslucent">true</item><item name="android:windowBackground">@android:color/transparent</item><item name="android:backgroundDimEnabled">false</item><item name="android:windowAnimationStyle">@android:style/Animation.Translucent</item></style></resources>#' $S
+          python3 - <<'PY'
+          p='android/app/build.gradle'
+          s=open(p).read()
+          assert 'dependencies {' in s
+          s=s.replace('dependencies {',"dependencies {\n    implementation 'ai.picovoice:porcupine-android:3.0.+'",1)
+          open(p,'w').write(s)
+          PY
+          grep -n "porcupine" android/app/build.gradle
+          grep -n "OverlayActivity\|WakeService" $M
 
       - name: Surum ve sabit imza
         working-directory: jarvis-app
