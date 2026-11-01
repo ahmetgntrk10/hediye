@@ -643,6 +643,14 @@ jobs:
                 Intent i = new Intent(this, OverlayActivity.class);
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NO_ANIMATION);
                 startActivity(i);
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable() {
+                  public void run() {
+                    if (!OverlayActivity.alive) {
+                      lastError = "panel açılamadı: telefon engelledi (Arka planda açılır pencere izni)";
+                      pause(false);
+                    }
+                  }
+                }, 3000);
               } catch (Exception e) {
                 lastError = "panel açılamadı: " + e.getMessage();
                 pause(false);
@@ -738,10 +746,12 @@ jobs:
           import android.view.WindowManager;
           import com.getcapacitor.BridgeActivity;
           public class OverlayActivity extends BridgeActivity {
+            static boolean alive = false;
             @Override
             public void onCreate(Bundle b) {
               registerPlugin(JarvisViewPlugin.class);
               super.onCreate(b);
+              alive = true;
               WakeService.setPaused(true);
               Window w = getWindow();
               w.setGravity(Gravity.BOTTOM);
@@ -759,6 +769,7 @@ jobs:
             @Override
             public void onDestroy() {
               super.onDestroy();
+              alive = false;
               WakeService.setPaused(false);
             }
           }
