@@ -162,6 +162,8 @@ async function local(t){
   const l=t.toLowerCase().replace(/[’']/g,"'");
   if(/^(uyu|uyku modu|uykuya geç|bekleme modu|dinlemeyi (bırak|kapat)|görüşürüz|kapan)\b/.test(l)){conv=false;setConv();return 'Tamam, beklemeye geçiyorum. Gerekirse elini aç.'}
   if(holoT<=0&&/^(dur|sus|sessiz ol|yeter)\b/.test(l)){stopSpeech();setState('idle');return ''}
+  if(/kamera(yı|yi)? (aç|başlat|çalıştır)|el takibini aç/.test(l)){if(MINI)return 'Kamera sadece tam uygulamada açılır.';startCam();return 'Kamerayı açıyorum.'}
+  if(/kamera(yı|yi)? (kapat|durdur)|el takibini kapat/.test(l)){stopCam();return 'Kamerayı kapattım.'}
   if(MINI&&/^(tamam|kapat|sağ ol|teşekkür|görüşürüz|yeter|bu kadar|hepsi bu)/.test(l)){setTimeout(closePanel,200);return''}
   if(siteOpen&&/kapat|gizle|geri dön|çık/.test(l)){closeSite();return''}
   if(NATIVE&&PL('JarvisView')){const pr=await phoneCmd(l,t);if(pr!==null)return pr}
@@ -243,16 +245,19 @@ async function loadMP(){
   const V='0.10.14',bases=['https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@'+V,'https://unpkg.com/@mediapipe/tasks-vision@'+V];let err;
   for(const b of bases){try{const m=await import(b+'/vision_bundle.mjs');const fs=await m.FilesetResolver.forVisionTasks(b+'/wasm');return{m,fs}}catch(e){err=e}}
   throw err}
+let loopOn=false;
+function stopCam(){try{vid.srcObject&&vid.srcObject.getTracks().forEach(t=>t.stop())}catch(e){}vid.srcObject=null;camOn=false;$('cam').classList.remove('on');hstat('kamera kapalı')}
 async function startCam(){
-  hstat('kamera açılıyor…');
+  if(camOn)return;hstat('kamera açılıyor…');
   try{const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});vid.srcObject=st;await vid.play();camOn=true;$('cam').classList.toggle('on',S.prev);}
   catch(e){hstat('kamera yok: '+e.name);msg('Kamera açılamadı ('+e.name+'). Tarayıcı ayarlarından kamera iznini aç.',8000);return}
+  if(hl){hstat('el takibi hazır · el: 0');return}
   try{
     hstat('el takibi yükleniyor…');
     const{m,fs}=await loadMP();
     const opt=d=>({baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:d},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:.4,minHandPresenceConfidence:.4,minTrackingConfidence:.4});
     try{hl=await m.HandLandmarker.createFromOptions(fs,opt('GPU'))}catch(e){hl=await m.HandLandmarker.createFromOptions(fs,opt('CPU'))}
-    log('s','El takibi hazır: elini aç ve 1 sn tut, ya da iki elini birbirine vur.');hstat('el takibi hazır · el: 0');loopHands();
+    log('s','El takibi hazır: elini aç ve 1 sn tut, ya da iki elini birbirine vur.');hstat('el takibi hazır · el: 0');if(!loopOn){loopOn=true;loopHands()}
   }catch(e){hstat('el takibi hatası');const t=String(e.message||e);msg('El takibi yüklenemedi: '+t.slice(0,90),9000);log('s','El takibi hatası: '+t)}
 }
 const HS=[{},{}];let twoSeen=0,twoStart=0,dS=null,modeKey='',modeSince=0;
@@ -499,8 +504,8 @@ $('go').onclick=async()=>{
   log('s','JARVIS çevrimiçi.');if(!S.kG&&!S.kD){log('s','Önce sağ üstten "ayar" → anahtarlarını gir.')}
   try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}if(NATIVE&&PL('SpeechRecognition')){try{await PL('SpeechRecognition').requestPermissions()}catch(e){}}
   if(NATIVE&&PL('JarvisView'))ensurePerms();
-  await startCam();applyListen();
-  say('Merhaba. Sistemler hazır.');
+  hstat('kamera kapalı');applyListen();
+  say('Merhaba. Sistemler hazır. Kamera için kamerayı aç de.');
 };
 if(!SR&&!NATIVE)$('bMic').style.display='none';
 function closePanel(){stopSpeech();stopRec();try{PL('JarvisView').finish()}catch(e){}}
