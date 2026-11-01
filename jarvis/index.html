@@ -141,11 +141,11 @@ function stopRec(){if(NATIVE&&recOn&&PL('SpeechRecognition')){try{PL('SpeechReco
 let muteHook=false;function muteBeep(ms){if(speaking)return;try{const J=PL('JarvisView');J&&J.mute({ms:ms||1100})}catch(e){}}
 let emptyN=0;
 function incomplete(t){const l=t.toLowerCase().trim();if(/[,…]$|\.\.\.$/.test(l))return true;const w=l.split(/\s+/);if(w.length<=1&&!/^(dur|sus|evet|hayır|tamam|iptal|kapat|durdur|geç|sonraki|önceki|devam|vazgeç|aç)$/.test(l))return true;return /(^|\s)(ve|ama|çünkü|yani|şey|e+|ee+|ıı+|hmm+|sonra|ki|diye|için|ile|bir|bu|şu|şunu|bunu|da|de|ya|veya|ben|bana|benim|kendime|gibi|falan|işte|mesela|bide|bi|hani|şöyle|ayrıca|önce|ardından|şuna|buna|ona|onu)$/.test(l)}
-async function listenNative(){const SN=PL('SpeechRecognition');if(recOn||speaking||enrolling)return;recOn=true;setState('listen');let t='';
+async function listenNative(){const SN=PL('SpeechRecognition');if(recOn||speaking||enrolling)return;recOn=true;lastAct=Date.now();setState('listen');let t='';
   if(!muteHook){muteHook=true;try{SN.addListener('listeningState',e=>{if(e&&e.status==='stopped')muteBeep(1200)})}catch(e){}}muteBeep(1200);
   try{const r=await SN.start({language:'tr-TR',maxResults:1,partialResults:false,popup:false});t=((r&&r.matches&&r.matches[0])||'').trim()}catch(e){if(/permission|izin/i.test(String(e&&e.message||e))){msg('Mikrofon izni verilmedi.');conv=false;setConv()}}
   let more=0;while(t&&incomplete(t)&&more<2&&!enrolling){more++;let t2='';try{muteBeep(1200);const to=setTimeout(()=>{try{SN.stop()}catch(e){}},2600);const r2=await SN.start({language:'tr-TR',maxResults:1,partialResults:false,popup:false});clearTimeout(to);t2=((r2&&r2.matches&&r2.matches[0])||'').trim()}catch(e){}if(!t2)break;t+=' '+t2}
-  recOn=false;if(enrolling)return;if(t){emptyN=0;handleSpeech(t)}else{setState('idle');if(MINI&&++emptyN>=2){closePanel();return}if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}}
+  recOn=false;if(enrolling)return;if(t){emptyN=0;lastAct=Date.now();handleSpeech(t)}else{setState('idle');if(MINI&&++emptyN>=4){closePanel();return}if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}}
 let enrolling=false;
 function listenOnce(){
   if(bgOff||enrolling)return;
@@ -263,7 +263,7 @@ const TASKRX=/(arka planda|ben yokken|ben dönene kadar|görev (ver|ekle|olarak)
 const YESRX=/^(evet|tamam|onay(la)?|gönder|yolla|olur|aynen|doğru|yap|hayır|hayir|vazgeç|iptal|gönderme|yapma|olmaz|dur)\b/i;
 let srvPend=false,srvSeen={};
 const srvOn=()=>!!(S.sU&&S.sT);
-function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 23:10 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
+function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 23:25 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
 async function srvCall(path,body,get){const url=S.sU.replace(/\/+$/,'')+path,headers={'Authorization':'Bearer '+S.sT,'Content-Type':'application/json'};const H=NATIVE&&PL('CapacitorHttp');
   if(H){const r=await(get?H.get({url,headers,connectTimeout:15000,readTimeout:70000}):H.post({url,headers,data:body,connectTimeout:15000,readTimeout:70000}));if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(r.status>=400)throw new Error('sunucu '+r.status);return typeof r.data==='string'?JSON.parse(r.data):r.data}
   const r=await tfetch(url,{method:get?'GET':'POST',headers,body:get?undefined:JSON.stringify(body)},70000);if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(!r.ok)throw new Error('sunucu '+r.status);return r.json()}
@@ -652,7 +652,7 @@ $('go').onclick=async()=>{
 };
 if(!SR&&!NATIVE)$('bMic').style.display='none';
 function closePanel(){if(spBuf)return;stopSpeech();stopRec();try{PL('JarvisView').finish()}catch(e){}}
-async function initMode(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{const r=await J.mode();if(r&&r.mode==='mini'){MINI=true;RESTRICT=!!r.locked;document.body.classList.add('mini');$('start').style.display='none';started=true;conv=true;setConv();lastAct=Date.now();const t0=Date.now();setInterval(()=>{muteBeep(3000);if((!busy&&!speaking&&Date.now()-lastAct>10000)||Date.now()-t0>200000)closePanel()},1500);setTimeout(()=>say('Dinliyorum.'),250)}else{if(S.wake)applyWake()}}catch(e){}}
+async function initMode(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{const r=await J.mode();if(r&&r.mode==='mini'){MINI=true;RESTRICT=!!r.locked;document.body.classList.add('mini');$('start').style.display='none';started=true;conv=true;setConv();lastAct=Date.now();const t0=Date.now();setInterval(()=>{muteBeep(3000);const idle=Date.now()-lastAct,act=busy||speaking||agentOn||!!pend||(recOn&&idle<60000);if(!act&&(idle>25000||Date.now()-t0>900000))closePanel()},1500);setTimeout(()=>say('Dinliyorum.'),250)}else{if(S.wake)applyWake()}}catch(e){}}
 initMode();
 window.__jv={feed(h,t){procHands(h,t)},get st(){return{conv,exT,yawT,zoomT,pitchT,holoT,glabel}},holo(v){holoName='armor';holoT=v;holoA=v;exT=0}};
 </script>
