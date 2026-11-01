@@ -99,12 +99,12 @@ function log(c,h){if(MINI){if(c==='u')$('mu').textContent=String(h).replace(/^�
 function msg(t,ms=4000){const e=$('msg');e.textContent=t;clearTimeout(msg.h);if(t)msg.h=setTimeout(()=>e.textContent='',ms)}
 const sp=$('set');async function wakeInfo(){const J=PL('JarvisView');if(!NATIVE||!J){$('wInfo').textContent='Bu özellik sadece Android uygulamasında.';return}try{const r=await J.wakeState();let ac=false;try{ac=await accOn()}catch(e){}$('wInfo').textContent='Telefon kontrolü: '+(ac?'açık':'YOK')+' · Dinleme: '+(r.running?'açık':'kapalı')+' · Üstte göster izni: '+(r.overlay?'var':'YOK')+' · Pil izni: '+(r.battery?'var':'YOK')+(r.error?' · Hata: '+r.error:'')+(r.saved?' · Kayıtlı ses: '+r.saved:'')+' · Duyduğu: '+(r.heard||'-')}catch(e){$('wInfo').textContent=''}}
 async function applyWake(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{await J.spkOnly({on:!!S.spk});try{await J.notifRead({on:!!S.nr,headset:!!S.nh})}catch(e){}if(S.wake){await ensurePerms();await J.wakeStart({key:S.kP})}else await J.wakeStop()}catch(e){log('s','Dinleme servisi: '+(e&&e.message||e))}setTimeout(wakeInfo,1200)}
-function openSet(v){sp.classList.toggle('on',v===undefined?!sp.classList.contains('on'):v);if(sp.classList.contains('on')){$('kG').value=S.kG;$('kD').value=S.kD;$('eng').value=S.eng;$('fast').checked=S.fast;$('vo').value=S.vo;$('vn').value=S.vn;$('always').checked=S.always;$('kP').value=S.kP;$('wake').checked=S.wake;$('spk').checked=S.spk;$('nr').checked=S.nr;$('nh').checked=S.nh;wakeInfo();$('all').checked=S.all;$('prev').checked=S.prev;$('sU').value=S.sU;$('sT').value=S.sT;srvStat()}}
+function openSet(v){sp.classList.toggle('on',v===undefined?!sp.classList.contains('on'):v);if(!sp.classList.contains('on')&&enrolling){enrolling=false;clearInterval(enT);enT=null;try{PL('JarvisView').enroll({on:false})}catch(e){}if(started)applyListen()}if(sp.classList.contains('on')){$('kG').value=S.kG;$('kD').value=S.kD;$('eng').value=S.eng;$('fast').checked=S.fast;$('vo').value=S.vo;$('vn').value=S.vn;$('always').checked=S.always;$('kP').value=S.kP;$('wake').checked=S.wake;$('spk').checked=S.spk;$('nr').checked=S.nr;$('nh').checked=S.nh;wakeInfo();$('all').checked=S.all;$('prev').checked=S.prev;$('sU').value=S.sU;$('sT').value=S.sT;srvStat()}}
 $('bSet').onclick=()=>openSet();$('bSet2').onclick=()=>openSet(true);
 $('bOv').onclick=()=>{try{PL('JarvisView').overlayPerm()}catch(e){}};let enT=null;
-async function enPoll(){const J=PL('JarvisView');try{const r=await J.wakeState();const n=r.enrollCount||0;$('enInfo').textContent='Öğrenilen: '+n+'/8'+(n<3?' · normal sesinle "hey asistan" de':n<5?' · şimdi ince/kısık sesle':n<8?' · şimdi kalın sesle':'')+(r.error?' · '+r.error:'');if(n>=8){clearInterval(enT);enT=null;await J.enroll({on:false});$('enInfo').textContent='Ses öğrenildi ('+n+' örnek). "Sadece benim sesimde aç"ı işaretleyip kaydet.'}}catch(e){}}
-$('bEn').onclick=async()=>{const J=PL('JarvisView');if(!NATIVE||!J)return;if(!S.kP&&false)return;try{await ensurePerms();await J.wakeStart({key:''});await J.enroll({on:true})}catch(e){}$('wake').checked=true;S.wake=true;store.set('wake',true);clearInterval(enT);enT=setInterval(enPoll,1000);enPoll()};
-$('bEc').onclick=async()=>{try{await PL('JarvisView').enroll({on:false});await PL('JarvisView').spkOnly({clear:true})}catch(e){}$('spk').checked=false;S.spk=false;store.set('spk',false);clearInterval(enT);$('enInfo').textContent='Ses kaydı silindi.'};
+async function enPoll(){const J=PL('JarvisView');try{const r=await J.wakeState();const n=r.enrollCount||0;$('enInfo').textContent='Öğrenilen: '+n+'/8'+(n<3?' · normal sesinle "hey asistan" de':n<5?' · şimdi ince/kısık sesle':n<8?' · şimdi kalın sesle':'')+(r.error?' · '+r.error:'');if(n>=8){clearInterval(enT);enT=null;await J.enroll({on:false});enrolling=false;if(started)applyListen();$('enInfo').textContent='Ses öğrenildi ('+n+' örnek). "Sadece benim sesimde aç"ı işaretleyip kaydet.'}}catch(e){}}
+$('bEn').onclick=async()=>{const J=PL('JarvisView');if(!NATIVE||!J)return;if(!S.kP&&false)return;enrolling=true;stopSpeech();stopRec();spBuf='';clearTimeout(spT);try{await ensurePerms();await J.wakeStart({key:''});await J.enroll({on:true})}catch(e){}$('wake').checked=true;S.wake=true;store.set('wake',true);clearInterval(enT);enT=setInterval(enPoll,1000);enPoll()};
+$('bEc').onclick=async()=>{enrolling=false;if(started)applyListen();try{await PL('JarvisView').enroll({on:false});await PL('JarvisView').spkOnly({clear:true})}catch(e){}$('spk').checked=false;S.spk=false;store.set('spk',false);clearInterval(enT);$('enInfo').textContent='Ses kaydı silindi.'};
 $('bNo').onclick=()=>{try{PL('JarvisView').notifSettings()}catch(e){}};$('bAc').onclick=()=>{try{PL('JarvisView').accSettings()}catch(e){}};$('bAs').onclick=()=>{try{PL('JarvisView').assistSettings()}catch(e){}};$('bBat').onclick=()=>{try{PL('JarvisView').batteryOpt()}catch(e){}};
 $('sSave').onclick=()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;S.vo=$('vo').value;S.vn=$('vn').value;S.always=$('always').checked;S.kP=$('kP').value.trim();S.wake=$('wake').checked;S.spk=$('spk').checked;S.nr=$('nr').checked;S.nh=$('nh').checked;S.all=$('all').checked;S.prev=$('prev').checked;S.sU=$('sU').value.trim();S.sT=$('sT').value.trim();for(const k in S)store.set(k==='fast'?'fast2':k==='always'?'always2':k,S[k]);openSet(false);$('cam').classList.toggle('on',S.prev&&camOn);models={};if(started)applyListen();applyWake()};
 $('sTest').onclick=async()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;models={};$('sInfo').textContent='test ediliyor…';try{const r=await ask('Sadece "tamam" de.',[]);$('sInfo').textContent='Çalıştı ('+r.engine+' · '+r.model+'): '+r.text}catch(e){$('sInfo').textContent='Hata: '+e.message}};
@@ -138,12 +138,13 @@ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec=null,r
 function stopRec(){if(NATIVE&&recOn&&PL('SpeechRecognition')){try{PL('SpeechRecognition').stop()}catch(e){}}if(rec){try{rec.onend=null;rec.abort()}catch(e){}}rec=null;recOn=false}
 let muteHook=false;function muteBeep(ms){try{const J=PL('JarvisView');J&&J.mute({ms:ms||1100})}catch(e){}}
 let emptyN=0;
-async function listenNative(){const SN=PL('SpeechRecognition');if(recOn||speaking)return;recOn=true;setState('listen');let t='';
+async function listenNative(){const SN=PL('SpeechRecognition');if(recOn||speaking||enrolling)return;recOn=true;setState('listen');let t='';
   if(!muteHook){muteHook=true;try{SN.addListener('listeningState',e=>{if(e&&e.status==='stopped')muteBeep(1200)})}catch(e){}}muteBeep(1200);
   try{const r=await SN.start({language:'tr-TR',maxResults:1,partialResults:false,popup:false});t=((r&&r.matches&&r.matches[0])||'').trim()}catch(e){if(/permission|izin/i.test(String(e&&e.message||e))){msg('Mikrofon izni verilmedi.');conv=false;setConv()}}
   recOn=false;if(t){emptyN=0;handleSpeech(t)}else{setState('idle');if(MINI&&++emptyN>=2){closePanel();return}if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}}
+let enrolling=false;
 function listenOnce(){
-  if(bgOff)return;
+  if(bgOff||enrolling)return;
   if(NATIVE&&PL('SpeechRecognition'))return listenNative();
   if(!SR){msg('Bu tarayıcıda ses tanıma yok. Yazarak kullan.');return}
   if(recOn||speaking)return;
@@ -157,11 +158,14 @@ document.addEventListener('visibilitychange',()=>{if(MINI)return;if(document.hid
 let bgOff=false;
 function applyListen(){if(bgOff)return;if(S.always)listenOnce();else stopRec()}
 function handleSpeech(t){
+  if(enrolling)return;if(spBuf){queueSpeech(t);return}
   t=t.replace(/^\s*(hey\s+|hey,?\s*)?(jarvis|jarvıs|cervis|çarvis|carvis|jarviz)[,.!]?\s*/i,'')||t;const low=t.toLowerCase();const wake=/(jarvis|jarvıs|cervis|çarvis|carvis)/i;
   if(S.always&&!S.all&&!conv&&awakeUntil<Date.now()){ if(!wake.test(low)){setState('idle');setTimeout(listenOnce,300);return} t=t.replace(/(hey\s+|hey,?\s*)?(jarvis|jarvıs|cervis|çarvis|carvis)[,.!]?\s*/i,'').trim(); if(!t){wakeUp();return} }
   awakeUntil=Date.now()+(S.always?0:0);
-  run(t);
+  queueSpeech(t);
 }
+let spBuf='',spT=null;
+function queueSpeech(t){spBuf=(spBuf+' '+t).trim();clearTimeout(spT);setState('listen');$('state').textContent='“'+spBuf.slice(-34)+'”';spT=setTimeout(()=>{const x=spBuf;spBuf='';if(x)run(x)},1800);setTimeout(()=>{if(!busy&&!speaking&&!recOn&&spBuf)listenOnce()},250)}
 function wakeUp(){awakeUntil=Date.now()+8000;pulse=1;say('Evet, buradayım.')}
 function setConv(){$('bMic').classList.toggle('on',conv);$('bMic').textContent=conv?'açık':'dinle'}
 $('bMic').onclick=()=>{if(!started)return;if(conv){conv=false;stopRec();stopSpeech();setState('idle');setConv();return}conv=true;setConv();stopSpeech();stopRec();listenOnce()};
@@ -272,6 +276,9 @@ const WEBQ=/bugün|şu an|şimdi|güncel|haber|son dakika|kimdir|fiyat|kur\b|dol
 async function run(text){
   if(busy)return;busy=true;log('u','› '+text);setState('think');clearInterval(window._iv);const t0s=Date.now(),iv=window._iv=setInterval(()=>{if(state==='think')$('state').textContent='düşünüyorum '+Math.round((Date.now()-t0s)/1000)+'s'},1000);
   try{
+    const NEG=/(karşılık verme|cevap verme|konuşma\b|yapma\b|açma\b|etme\b|dokunma\b|gönderme\b|kapatma\b|aramayı?n?\b.*\bdeğil|söylemiyorum|demedim|sana demedim|bir şey yapma)/i,TALK=/(ses(imi)? (eğit|öğren|tanıt)|ses eğit|sesimi tanı)/i;
+    if(NEG.test(text)){clearInterval(iv);busy=false;setState('idle');log('j','Tamam, bir şey yapmıyorum.');await say('Tamam, bir şey yapmıyorum.');return}
+    if(TALK.test(text)&&!/^(ayar|aç)/.test(text.trim())){clearInterval(iv);busy=false;setState('idle');const m2='Sesini öğrenmek için ayarlarda Sesimi öğren düğmesine bas, sonra hey asistan de.';log('j',m2);await say(m2);return}
     let r;if(RESTRICT&&/\b(ara|arar|arama|mesaj|whatsapp|sms|aç|kapat|alarm|rehber|kişi|kişisi|fener|ses|yaz|gönder|uygulama|kameray)\w*/i.test(text))r='Telefon kilitliyken bunu yapmam. Önce kilidi aç.';else r=await local(text);
     if(r===''){clearInterval(iv);busy=false;setState('idle');if(conv||S.always)setTimeout(listenOnce,250);return}
     if(r){log('j',r);hist.push({r:'u',t:text},{r:'a',t:r});busy=false;await say(r);return}
@@ -570,7 +577,7 @@ async function phoneCmd(l,t){const J=PL('JarvisView');let m;
   if(/(aramayı|çağrıyı)\s*(reddet|kapat|bitir)|telefonu kapat|^reddet$/.test(l)){try{await J.callEnd();return'Kapattım.'}catch(e){return String(e&&e.message||e)}}
   if(/(kimler|kim|hangi).*(mesaj|yazdı|attı|aradı)|bildirim\w*\s*(oku|söyle|neler|var mı|bak)|yeni mesaj|bildirimlerimi/.test(l))return await readNotifs();
   m=l.match(/(wifi|wi-fi|bluetooth|konum|uçak modu|ekran ayar\w*|ses ayar\w*|pil tasarruf\w*|ayarları aç|ayarlar)/);
-  if(m&&/aç|kapat|ayar/.test(l)){const pg=/wifi|wi-fi/.test(m[1])?'wifi':/bluetooth/.test(m[1])?'bluetooth':/konum/.test(m[1])?'location':/uçak/.test(m[1])?'airplane':/ekran/.test(m[1])?'display':/ses/.test(m[1])?'sound':/pil/.test(m[1])?'battery':'';await J.settings({page:pg});return'Android doğrudan açıp kapatmama izin vermiyor. Ayar sayfasını açtım.'}
+  if(m&&l.split(/\s+/).length<=5&&/(\baç\b|\bkapat\b|\baçsana\b|ayarları aç|ayarlar$|ayarlara)/.test(l)&&!/(ayarlardan|ayarlarda|ayarlarına|ayarlarında)/.test(l)){const pg=/wifi|wi-fi/.test(m[1])?'wifi':/bluetooth/.test(m[1])?'bluetooth':/konum/.test(m[1])?'location':/uçak/.test(m[1])?'airplane':/ekran/.test(m[1])?'display':/ses/.test(m[1])?'sound':/pil/.test(m[1])?'battery':'';await J.settings({page:pg});return'Android doğrudan açıp kapatmama izin vermiyor. Ayar sayfasını açtım.'}
   if(/(yol tarifi|navigasyon|götür)/.test(l)){const q=l.replace(/yol tarifi|navigasyonu?|başlat|götür\w*|bana|lütfen|için|ver/g,' ').replace(/['’]?\s*(ye|ya|e|a)\s*$/,'').replace(/\s+/g,' ').trim();if(q)return await execAct({t:'nav',q})}
   m=l.match(/^(.+?)\s+(aç|açar mısın|açsana|başlat)$/);if(m&&!/hologram|ekran|zırh|kask|küre|küp|dna/.test(m[1])&&m[1].length<30){const r=await J.openApp({name:m[1]});if(r&&r.ok)return r.label+' açılıyor.';if(await accOn())return await agent(m[1]+' uygulamasını bul ve aç.')}
   return null}
@@ -610,7 +617,7 @@ $('go').onclick=async()=>{
   say('Merhaba. Sistemler hazır. Kamera için kamerayı aç de.');
 };
 if(!SR&&!NATIVE)$('bMic').style.display='none';
-function closePanel(){stopSpeech();stopRec();try{PL('JarvisView').finish()}catch(e){}}
+function closePanel(){if(spBuf)return;stopSpeech();stopRec();try{PL('JarvisView').finish()}catch(e){}}
 async function initMode(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{const r=await J.mode();if(r&&r.mode==='mini'){MINI=true;RESTRICT=!!r.locked;document.body.classList.add('mini');$('start').style.display='none';started=true;conv=true;setConv();lastAct=Date.now();const t0=Date.now();setInterval(()=>{muteBeep(3000);if((!busy&&!speaking&&Date.now()-lastAct>10000)||Date.now()-t0>200000)closePanel()},1500);setTimeout(()=>say('Dinliyorum.'),250)}else{if(S.wake)applyWake()}}catch(e){}}
 initMode();
 window.__jv={feed(h,t){procHands(h,t)},get st(){return{conv,exT,yawT,zoomT,pitchT,holoT,glabel}},holo(v){holoName='armor';holoT=v;holoA=v;exT=0}};
