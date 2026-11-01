@@ -204,6 +204,10 @@ jobs:
               }, ms);
               call.resolve();
             }
+            private static String key(String s) {
+              String t = nrm(s).replaceAll("[^a-z0-9 ]", "").replace('d', 't').replace('b', 'p').replace('g', 'k').replace("h", "");
+              return t.replaceAll("(.)\\1+", "$1").trim();
+            }
             private static String nrm(String s) {
               if (s == null) return "";
               String t = s.toLowerCase(new java.util.Locale("tr"));
@@ -238,7 +242,7 @@ jobs:
                   String n = c.getString(0);
                   String num = c.getString(1);
                   if (n == null || num == null) continue;
-                  if (q.length() == 0 || !nrm(n).contains(q)) continue;
+                  if (q.length() == 0 || !(nrm(n).contains(q) || key(n).contains(key(q)))) continue;
                   if (!seen.add(n + "|" + num.replaceAll("\\D", ""))) continue;
                   JSObject o = new JSObject();
                   o.put("name", n);
@@ -255,6 +259,7 @@ jobs:
             public void waCall(PluginCall call) {
               String q = nrm(call.getString("name", ""));
               boolean video = call.getBoolean("video", false);
+              String kq = key(call.getString("name", ""));
               if (getPermissionState("contacts") != PermissionState.GRANTED) { call.reject("izin yok"); return; }
               String mime = video ? "vnd.android.cursor.item/vnd.com.whatsapp.video.call" : "vnd.android.cursor.item/vnd.com.whatsapp.voip.call";
               Cursor c = null;
@@ -266,9 +271,9 @@ jobs:
                 while (c != null && c.moveToNext()) {
                   String n = c.getString(1);
                   if (n == null || q.length() == 0) continue;
-                  String nn = nrm(n);
-                  if (nn.equals(q) && exact < 0) { exact = c.getLong(0); exactName = n; }
-                  else if (nn.contains(q) && part < 0) { part = c.getLong(0); partName = n; }
+                  String nn = nrm(n), kn = key(n);
+                  if ((nn.equals(q) || kn.equals(kq)) && exact < 0) { exact = c.getLong(0); exactName = n; }
+                  else if ((nn.contains(q) || kn.contains(kq)) && part < 0) { part = c.getLong(0); partName = n; }
                 }
                 long id = exact >= 0 ? exact : part;
                 String nm = exact >= 0 ? exactName : partName;
@@ -1279,16 +1284,21 @@ jobs:
             private String esc(String s) {
               return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ").replace("\t", " ");
             }
+            private static String fold(String s) {
+              String t = s.toLowerCase(new Locale("tr", "TR")).replace("ı", "i").replace("ş", "s").replace("ğ", "g").replace("ü", "u").replace("ö", "o").replace("ç", "c").replaceAll("[^a-z0-9 ]", "").replace('d', 't').replace('b', 'p').replace('g', 'k').replace("h", "");
+              return t.replaceAll("(.)\\1+", "$1").trim();
+            }
             String reply(String name, String text) {
               try {
                 Locale tr = new Locale("tr", "TR");
                 String q = name.toLowerCase(tr);
+                String fq = fold(name);
                 StatusBarNotification[] arr = getActiveNotifications();
                 for (StatusBarNotification sbn : arr) {
                   Notification n = sbn.getNotification();
                   if (n == null || n.actions == null) continue;
                   CharSequence t = n.extras.getCharSequence(Notification.EXTRA_TITLE);
-                  if (t == null || !t.toString().toLowerCase(tr).contains(q)) continue;
+                  if (t == null || !(t.toString().toLowerCase(tr).contains(q) || fold(t.toString()).contains(fq))) continue;
                   for (Notification.Action ac : n.actions) {
                     android.app.RemoteInput[] ri = ac.getRemoteInputs();
                     if (ri == null || ri.length == 0) continue;

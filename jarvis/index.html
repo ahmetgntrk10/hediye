@@ -186,6 +186,7 @@ $('bClose').onclick=closeSite;
 function openUrl(u,label){if(NATIVE&&PL('JarvisView')){showSite(u,/whatsapp/.test(u));return}
   log('s',{html:'<a href="'+u+'" target="_blank" rel="noopener">Aç: '+label+'</a>'});try{const w=window.open(u,'_blank');if(!w)msg('Açılmadıysa yazıdaki bağlantıya dokun.')}catch(e){}}
 function dur(t){const m=t.match(/(\d+)\s*(saniye|sn|dakika|dk|saat)/);if(!m)return 0;const n=+m[1];return n*(/saat/.test(m[2])?3600:/dak|dk/.test(m[2])?60:1)*1000}
+async function googleOpen(q){const u='https://www.google.com/search?q='+encodeURIComponent(q);if(NATIVE&&PL('AppLauncher')){try{await PL('AppLauncher').openUrl({url:u});return}catch(e){}}openUrl(u,'Google: '+q)}
 async function local(t){
   const l=t.toLowerCase().replace(/[’']/g,"'");
   if(/(karşılık verme|cevap verme|bana cevap verme|sus\s*$|sessiz ol|konuşma\s*$)/.test(l)){stopSpeech();setState('idle');return ''}
@@ -215,8 +216,10 @@ async function local(t){
   if(/notlarım|notları oku/.test(l)){const n=store.get('notes',[]);return n.length?'Notların: '+n.slice(-5).join('. '):'Hiç notun yok.'}
   if(/notları sil/.test(l)){store.set('notes',[]);return 'Notlar silindi.'}
   if(/youtube/.test(l)&&/\b(ara|aç|oynat|izle|aratır)/.test(l)){const q=l.replace(/youtube('?\s*(da|de|ta|te))?/,' ').replace(/\b(ara|aç|açar mısın|oynat|izle|aratır mısın|bana|bir)\b/g,' ').replace(/\s+/g,' ').trim();if(q){openUrl('https://www.youtube.com/results?search_query='+encodeURIComponent(q),'YouTube: '+q);return q+' için YouTube açılıyor.'}}
-  m=l.match(/google'?(da|ta)?\s+(.+?)\s*(ara)?$/)||l.match(/(.+?)\s+(ara|araştır)$/);
-  if(m){const q=(m[2]||m[1]).replace(/\s*(ara|araştır)$/,'').trim();if(q&&q.length>1){openUrl('https://www.google.com/search?q='+encodeURIComponent(q),'Google: '+q);return q+' aranıyor.'}}
+  m=l.match(/^(?:.*\s)?google\w*'?\s*(?:da|de|ta|te)?\s+(.+?)(?:\s+(?:ara|arat|aratsana|araştır|araştırır mısın|arar mısın|arat mısın))?$/);
+  if(m&&m[1]&&!/(aç|açar mısın|başlat|kapat)\s*$/.test(l)){const q=m[1].replace(/^(bana|bir|şunu|şu)\s+/,'').trim();if(q.length>1){await googleOpen(q);return q+' aranıyor.'}}
+  m=l.match(/(.+?)\s+(ara|araştır)$/);
+  if(m){const q=m[1].trim();if(q&&q.length>1){await googleOpen(q);return q+' aranıyor.'}}
   m=l.match(/^(.+?)\s+(aç|açar mısın|açsana)$/);if(m){const k=Object.keys(SITES).find(k=>m[1].includes(k));if(k){if(NATIVE){await openApp(k);return k+' açılıyor.'}openUrl(SITES[k],k);return k+' açılıyor.'}}
   if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/.test(l))return null;
   return null;
@@ -260,7 +263,7 @@ const TASKRX=/(arka planda|ben yokken|ben dönene kadar|görev (ver|ekle|olarak)
 const YESRX=/^(evet|tamam|onay(la)?|gönder|yolla|olur|aynen|doğru|yap|hayır|hayir|vazgeç|iptal|gönderme|yapma|olmaz|dur)\b/i;
 let srvPend=false,srvSeen={};
 const srvOn=()=>!!(S.sU&&S.sT);
-function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 22:40 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
+function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 23:10 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
 async function srvCall(path,body,get){const url=S.sU.replace(/\/+$/,'')+path,headers={'Authorization':'Bearer '+S.sT,'Content-Type':'application/json'};const H=NATIVE&&PL('CapacitorHttp');
   if(H){const r=await(get?H.get({url,headers,connectTimeout:15000,readTimeout:70000}):H.post({url,headers,data:body,connectTimeout:15000,readTimeout:70000}));if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(r.status>=400)throw new Error('sunucu '+r.status);return typeof r.data==='string'?JSON.parse(r.data):r.data}
   const r=await tfetch(url,{method:get?'GET':'POST',headers,body:get?undefined:JSON.stringify(body)},70000);if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(!r.ok)throw new Error('sunucu '+r.status);return r.json()}
