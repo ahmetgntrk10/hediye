@@ -464,6 +464,40 @@ jobs:
               } catch (Exception e) { fail(call, e); }
             }
             @PluginMethod
+            public void accState(PluginCall call) {
+              JSObject r = new JSObject();
+              r.put("on", JarvisAccess.inst != null);
+              call.resolve(r);
+            }
+            @PluginMethod
+            public void accSettings(PluginCall call) {
+              try {
+                getContext().startActivity(newTask(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+                call.resolve();
+              } catch (Exception e) { fail(call, e); }
+            }
+            @PluginMethod
+            public void keep(PluginCall call) {
+              OverlayActivity.keep = call.getBoolean("on", false);
+              call.resolve();
+            }
+            @PluginMethod
+            public void screen(PluginCall call) {
+              JSObject r = new JSObject();
+              r.put("nodes", JarvisAccess.inst == null ? "" : JarvisAccess.inst.screenJson());
+              r.put("on", JarvisAccess.inst != null);
+              call.resolve(r);
+            }
+            @PluginMethod
+            public void act(PluginCall call) {
+              JSObject r = new JSObject();
+              if (JarvisAccess.inst == null) { r.put("ok", false); r.put("msg", "erişilebilirlik kapalı"); call.resolve(r); return; }
+              String m = JarvisAccess.inst.doAct(call.getString("a", ""), call.getString("text", ""), call.getInt("idx", -1), call.getString("dir", "down"), call.getInt("x", -1), call.getInt("y", -1));
+              r.put("ok", m.startsWith("ok"));
+              r.put("msg", m);
+              call.resolve(r);
+            }
+            @PluginMethod
             public void batteryOpt(PluginCall call) {
               try {
                 Intent i;
@@ -672,6 +706,181 @@ jobs:
             }
           }
           JAVA
+          cat > $D/JarvisAccess.java <<'JAVA'
+          package com.tapverse.jarvis;
+          import android.accessibilityservice.AccessibilityService;
+          import android.accessibilityservice.GestureDescription;
+          import android.content.Intent;
+          import android.graphics.Path;
+          import android.graphics.Rect;
+          import android.os.Bundle;
+          import android.view.accessibility.AccessibilityEvent;
+          import android.view.accessibility.AccessibilityNodeInfo;
+          import android.view.accessibility.AccessibilityWindowInfo;
+          import java.util.ArrayList;
+          import java.util.List;
+          public class JarvisAccess extends AccessibilityService {
+            static JarvisAccess inst;
+            private final List<AccessibilityNodeInfo> last = new ArrayList<AccessibilityNodeInfo>();
+            private String lastPkg = "";
+            @Override
+            protected void onServiceConnected() { inst = this; }
+            @Override
+            public void onAccessibilityEvent(AccessibilityEvent e) {}
+            @Override
+            public void onInterrupt() {}
+            @Override
+            public boolean onUnbind(Intent i) { inst = null; return super.onUnbind(i); }
+            private AccessibilityNodeInfo targetRoot() {
+              try {
+                List<AccessibilityWindowInfo> ws = getWindows();
+                AccessibilityNodeInfo best = null;
+                if (ws != null) {
+                  for (AccessibilityWindowInfo w : ws) {
+                    if (w.getType() != AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                    AccessibilityNodeInfo r = w.getRoot();
+                    if (r == null) continue;
+                    if (getPackageName().equals(String.valueOf(r.getPackageName()))) continue;
+                    if (best == null || w.isActive()) best = r;
+                  }
+                }
+                if (best != null) return best;
+              } catch (Exception e) {}
+              return getRootInActiveWindow();
+            }
+            private String esc(String s) {
+              return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ").replace("\t", " ");
+            }
+            private boolean clickableUp(AccessibilityNodeInfo n) {
+              AccessibilityNodeInfo p = n;
+              int d = 0;
+              while (p != null && d < 6) { if (p.isClickable()) return true; p = p.getParent(); d++; }
+              return false;
+            }
+            private void walk(AccessibilityNodeInfo n, int depth) {
+              if (n == null || last.size() >= 120 || depth > 40) return;
+              CharSequence t = n.getText();
+              CharSequence c = n.getContentDescription();
+              String txt = t != null && t.length() > 0 ? t.toString() : (c != null ? c.toString() : "");
+              if (n.isVisibleToUser() && (txt.length() > 0 || n.isEditable() || n.isClickable())) last.add(n);
+              for (int i = 0; i < n.getChildCount(); i++) walk(n.getChild(i), depth + 1);
+            }
+            String screenJson() {
+              last.clear();
+              AccessibilityNodeInfo root = targetRoot();
+              if (root == null) return "{\"pkg\":\"\",\"n\":[]}";
+              lastPkg = String.valueOf(root.getPackageName());
+              walk(root, 0);
+              StringBuilder sb = new StringBuilder("{\"pkg\":\"" + esc(lastPkg) + "\",\"n\":[");
+              for (int i = 0; i < last.size(); i++) {
+                AccessibilityNodeInfo n = last.get(i);
+                CharSequence t = n.getText();
+                CharSequence c = n.getContentDescription();
+                String txt = t != null && t.length() > 0 ? t.toString() : (c != null ? c.toString() : "");
+                if (txt.length() > 80) txt = txt.substring(0, 80);
+                Rect b = new Rect();
+                n.getBoundsInScreen(b);
+                if (i > 0) sb.append(",");
+                sb.append("{\"i\":" + i + ",\"t\":\"" + esc(txt) + "\",\"c\":" + (clickableUp(n) ? 1 : 0) + ",\"e\":" + (n.isEditable() ? 1 : 0) + ",\"x\":" + b.centerX() + ",\"y\":" + b.centerY() + "}");
+              }
+              sb.append("]}");
+              return sb.toString();
+            }
+            private boolean tap(int x, int y) {
+              try {
+                Path p = new Path();
+                p.moveTo(x, y);
+                GestureDescription.Builder g = new GestureDescription.Builder();
+                g.addStroke(new GestureDescription.StrokeDescription(p, 0, 80));
+                return dispatchGesture(g.build(), null, null);
+              } catch (Exception e) { return false; }
+            }
+            private boolean clickNode(AccessibilityNodeInfo n) {
+              AccessibilityNodeInfo p = n;
+              int d = 0;
+              while (p != null && d < 6) {
+                if (p.isClickable() && p.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
+                p = p.getParent();
+                d++;
+              }
+              Rect b = new Rect();
+              n.getBoundsInScreen(b);
+              return tap(b.centerX(), b.centerY());
+            }
+            private String nm(String s) {
+              return s == null ? "" : s.toLowerCase(new java.util.Locale("tr")).trim();
+            }
+            private AccessibilityNodeInfo findText(String want) {
+              screenJson();
+              String w = nm(want);
+              AccessibilityNodeInfo part = null;
+              for (AccessibilityNodeInfo n : last) {
+                CharSequence t = n.getText();
+                CharSequence c = n.getContentDescription();
+                String a = nm(t != null ? t.toString() : "");
+                String b = nm(c != null ? c.toString() : "");
+                if (a.equals(w) || b.equals(w)) return n;
+                if (part == null && (a.contains(w) || b.contains(w))) part = n;
+              }
+              return part;
+            }
+            private AccessibilityNodeInfo findFirst(boolean editable) {
+              for (AccessibilityNodeInfo n : last) {
+                if (editable ? n.isEditable() : n.isScrollable()) return n;
+              }
+              return null;
+            }
+            String doAct(String a, String text, int idx, String dir, int x, int y) {
+              try {
+                if (a.equals("back")) return performGlobalAction(GLOBAL_ACTION_BACK) ? "ok geri" : "olmadı";
+                if (a.equals("home")) return performGlobalAction(GLOBAL_ACTION_HOME) ? "ok ana ekran" : "olmadı";
+                if (a.equals("recents")) return performGlobalAction(GLOBAL_ACTION_RECENTS) ? "ok son uygulamalar" : "olmadı";
+                if (a.equals("notifications")) return performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS) ? "ok bildirimler" : "olmadı";
+                if (a.equals("tap")) return tap(x, y) ? "ok dokunuldu" : "olmadı";
+                if (a.equals("click")) {
+                  AccessibilityNodeInfo n = null;
+                  if (idx >= 0) { if (idx < last.size()) n = last.get(idx); }
+                  else n = findText(text);
+                  if (n == null) return "bulunamadı: " + text;
+                  return clickNode(n) ? "ok tıklandı" : "tıklanamadı";
+                }
+                if (a.equals("type")) {
+                  screenJson();
+                  AccessibilityNodeInfo n = null;
+                  if (idx >= 0 && idx < last.size()) n = last.get(idx);
+                  if (n == null) n = findFirst(true);
+                  if (n == null) return "yazı kutusu yok";
+                  n.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                  Bundle b = new Bundle();
+                  b.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
+                  return n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, b) ? "ok yazıldı" : "yazılamadı";
+                }
+                if (a.equals("scroll")) {
+                  screenJson();
+                  AccessibilityNodeInfo n = findFirst(false);
+                  if (n == null) return "kaydırılacak yer yok";
+                  boolean ok = n.performAction(dir.equals("up") ? AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD : AccessibilityNodeInfo.ACTION_SCROLL_FORWARD);
+                  return ok ? "ok kaydırıldı" : "kaydırılamadı";
+                }
+                return "bilinmeyen eylem";
+              } catch (Exception e) { return "hata: " + e.getMessage(); }
+            }
+          }
+          JAVA
+          mkdir -p android/app/src/main/res/xml
+          cat > android/app/src/main/res/xml/jarvis_access.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+            android:accessibilityEventTypes="typeWindowStateChanged"
+            android:accessibilityFeedbackType="feedbackGeneric"
+            android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagReportViewIds"
+            android:canRetrieveWindowContent="true"
+            android:canPerformGestures="true"
+            android:notificationTimeout="200"
+            android:description="@string/jarvis_acc_desc" />
+          XML
+          RS=android/app/src/main/res/values/strings.xml
+          sed -i 's#</resources>#<string name="jarvis_acc_desc">Jarvis, sesli komutlarinla telefondaki uygulamalari senin yerine kullanir.</string></resources>#' $RS
           cat > $D/JarvisInteractionService.java <<'JAVA'
           package com.tapverse.jarvis;
           import android.service.voice.VoiceInteractionService;
@@ -747,6 +956,7 @@ jobs:
           import com.getcapacitor.BridgeActivity;
           public class OverlayActivity extends BridgeActivity {
             static boolean alive = false;
+            static boolean keep = false;
             @Override
             public void onCreate(Bundle b) {
               registerPlugin(JarvisViewPlugin.class);
@@ -763,20 +973,21 @@ jobs:
             }
             @Override
             public boolean onTouchEvent(MotionEvent e) {
-              if (e.getAction() == MotionEvent.ACTION_OUTSIDE) { finish(); return true; }
+              if (e.getAction() == MotionEvent.ACTION_OUTSIDE) { if (!keep) finish(); return true; }
               return super.onTouchEvent(e);
             }
             @Override
             public void onDestroy() {
               super.onDestroy();
               alive = false;
+              keep = false;
               WakeService.setPaused(false);
             }
           }
           JAVA
           M=android/app/src/main/AndroidManifest.xml
           sed -i 's#<uses-permission android:name="android.permission.VIBRATE"/>#<uses-permission android:name="android.permission.VIBRATE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/><uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/><uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>#' $M
-          sed -i 's#</application>#<activity android:name=".OverlayActivity" android:theme="@style/OverlayTheme" android:launchMode="singleTask" android:excludeFromRecents="true" android:taskAffinity="" android:exported="false" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"/><service android:name=".JarvisInteractionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"><intent-filter><action android:name="android.service.voice.VoiceInteractionService"/></intent-filter><meta-data android:name="android.voice_interaction" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisSessionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"/><service android:name=".JarvisRecognizer" android:exported="true"><intent-filter><action android:name="android.speech.RecognitionService"/></intent-filter><meta-data android:name="android.speech" android:resource="@xml/jarvis_interaction"/></service><service android:name=".WakeService" android:foregroundServiceType="microphone" android:exported="false"/></application>#' $M
+          sed -i 's#</application>#<activity android:name=".OverlayActivity" android:theme="@style/OverlayTheme" android:launchMode="singleTask" android:excludeFromRecents="true" android:taskAffinity="" android:exported="false" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"/><service android:name=".JarvisInteractionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"><intent-filter><action android:name="android.service.voice.VoiceInteractionService"/></intent-filter><meta-data android:name="android.voice_interaction" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisSessionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"/><service android:name=".JarvisRecognizer" android:exported="true"><intent-filter><action android:name="android.speech.RecognitionService"/></intent-filter><meta-data android:name="android.speech" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisAccess" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/jarvis_access"/></service><service android:name=".WakeService" android:foregroundServiceType="microphone" android:exported="false"/></application>#' $M
           S=android/app/src/main/res/values/styles.xml
           sed -i 's#</resources>#<style name="OverlayTheme" parent="Theme.AppCompat.NoActionBar"><item name="android:windowIsTranslucent">true</item><item name="android:windowBackground">@android:color/transparent</item><item name="android:backgroundDimEnabled">false</item><item name="android:windowAnimationStyle">@android:style/Animation.Translucent</item></style></resources>#' $S
           python3 - <<'PY'

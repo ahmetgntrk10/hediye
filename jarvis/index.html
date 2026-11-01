@@ -70,7 +70,7 @@ body.mini #mini{display:block;position:fixed;left:10px;right:10px;bottom:12px;he
 <input type="hidden" id="kP">
 <div class="sw"><span>Başka ekrandayken "Hey asistan" deyince panel aç</span><input type="checkbox" id="wake"></div>
 <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="bOv" style="flex:1">üstte göster izni</button><button class="btn" id="bBat" style="flex:1">pil izni</button></div>
-<div style="margin-top:8px"><button class="btn" id="bAs" style="width:100%">Jarvis'i telefonun asistanı yap</button></div>
+<div style="margin-top:8px"><button class="btn" id="bAc" style="width:100%;margin-bottom:8px">Erişilebilirlik izni ver (telefonu kullanabilsin)</button><button class="btn" id="bAs" style="width:100%">Jarvis'i telefonun asistanı yap</button></div>
 <small id="wInfo"></small>
 <small>Hızlı mod açıkken hızlı Gemini modeli seçilir ve düşünme kapatılır; cevaplar birkaç saniyede gelir. Haber, fiyat gibi güncel sorularda Gemini otomatik Google'da arar.</small><small>Anahtarlar sadece bu telefonun tarayıcısında saklanır. Model adı yazmana gerek yok, en iyi mevcut model otomatik seçilir.</small>
 <div style="display:flex;gap:8px;margin-top:14px"><button class="btn" id="sTest" style="flex:1">test et</button><button class="btn on" id="sSave" style="flex:1">kaydet</button></div>
@@ -88,11 +88,11 @@ let MINI=false,lastAct=Date.now();
 function log(c,h){if(MINI){if(c==='u')$('mu').textContent=String(h).replace(/^›\s*/,'');else if(c==='j')$('mj').textContent=h;lastAct=Date.now()}
   const d=document.createElement('div');d.className=c;if(h&&h.html)d.innerHTML=h.html;else d.textContent=h;$('log').appendChild(d);$('log').scrollTop=1e9;while($('log').children.length>40)$('log').firstChild.remove()}
 function msg(t,ms=4000){const e=$('msg');e.textContent=t;clearTimeout(msg.h);if(t)msg.h=setTimeout(()=>e.textContent='',ms)}
-const sp=$('set');async function wakeInfo(){const J=PL('JarvisView');if(!NATIVE||!J){$('wInfo').textContent='Bu özellik sadece Android uygulamasında.';return}try{const r=await J.wakeState();$('wInfo').textContent='Dinleme: '+(r.running?'açık':'kapalı')+' · Üstte göster izni: '+(r.overlay?'var':'YOK')+' · Pil izni: '+(r.battery?'var':'YOK')+(r.error?' · Hata: '+r.error:'')+' · Duyduğu: '+(r.heard||'-')}catch(e){$('wInfo').textContent=''}}
+const sp=$('set');async function wakeInfo(){const J=PL('JarvisView');if(!NATIVE||!J){$('wInfo').textContent='Bu özellik sadece Android uygulamasında.';return}try{const r=await J.wakeState();let ac=false;try{ac=await accOn()}catch(e){}$('wInfo').textContent='Telefon kontrolü: '+(ac?'açık':'YOK')+' · Dinleme: '+(r.running?'açık':'kapalı')+' · Üstte göster izni: '+(r.overlay?'var':'YOK')+' · Pil izni: '+(r.battery?'var':'YOK')+(r.error?' · Hata: '+r.error:'')+' · Duyduğu: '+(r.heard||'-')}catch(e){$('wInfo').textContent=''}}
 async function applyWake(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{if(S.wake){await ensurePerms();await J.wakeStart({key:S.kP})}else await J.wakeStop()}catch(e){log('s','Dinleme servisi: '+(e&&e.message||e))}setTimeout(wakeInfo,1200)}
 function openSet(v){sp.classList.toggle('on',v===undefined?!sp.classList.contains('on'):v);if(sp.classList.contains('on')){$('kG').value=S.kG;$('kD').value=S.kD;$('eng').value=S.eng;$('fast').checked=S.fast;$('vo').value=S.vo;$('vn').value=S.vn;$('always').checked=S.always;$('kP').value=S.kP;$('wake').checked=S.wake;wakeInfo();$('all').checked=S.all;$('prev').checked=S.prev}}
 $('bSet').onclick=()=>openSet();$('bSet2').onclick=()=>openSet(true);
-$('bOv').onclick=()=>{try{PL('JarvisView').overlayPerm()}catch(e){}};$('bAs').onclick=()=>{try{PL('JarvisView').assistSettings()}catch(e){}};$('bBat').onclick=()=>{try{PL('JarvisView').batteryOpt()}catch(e){}};
+$('bOv').onclick=()=>{try{PL('JarvisView').overlayPerm()}catch(e){}};$('bAc').onclick=()=>{try{PL('JarvisView').accSettings()}catch(e){}};$('bAs').onclick=()=>{try{PL('JarvisView').assistSettings()}catch(e){}};$('bBat').onclick=()=>{try{PL('JarvisView').batteryOpt()}catch(e){}};
 $('sSave').onclick=()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;S.vo=$('vo').value;S.vn=$('vn').value;S.always=$('always').checked;S.kP=$('kP').value.trim();S.wake=$('wake').checked;S.all=$('all').checked;S.prev=$('prev').checked;for(const k in S)store.set(k==='fast'?'fast2':k==='always'?'always2':k,S[k]);openSet(false);$('cam').classList.toggle('on',S.prev&&camOn);models={};if(started)applyListen();applyWake()};
 $('sTest').onclick=async()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;models={};$('sInfo').textContent='test ediliyor…';try{const r=await ask('Sadece "tamam" de.',[]);$('sInfo').textContent='Çalıştı ('+r.engine+' · '+r.model+'): '+r.text}catch(e){$('sInfo').textContent='Hata: '+e.message}};
 /* ---------- speech out ---------- */
@@ -195,7 +195,7 @@ async function local(t){
 }
 /* ---------- LLM ---------- */
 const SYS='Sen JARVIS adlı, Iron Man filmindeki gibi zeki, sakin ve hafif esprili bir sesli asistansın. Kullanıcıyla Türkçe konuş (kullanıcı başka dilde yazarsa o dilde). Cevapların konuşulacağı için kısa ve doğal olsun: genelde 1-3 cümle. Madde işareti, emoji ve markdown kullanma. Bilmediğin şeyi uydurma. Uygulama açmak, ekrana yansıtmak, telefonu kontrol etmek gibi eylemleri sen yapamazsın; yapmış gibi konuşma, yapamadığını söyle. Kullanıcıya "efendim" demen gerekmez, samimi ol.';
-const ACT_SYS=NATIVE?' Telefonu kontrol edebilirsin. Kullanıcı bir eylem istediğinde (arama, mesaj, alarm, fener, ses, uygulama açma, navigasyon, ayarlar) kısa cevabının sonuna TEK satır ekle: [[EYLEM {"t":"call","name":"Ahmet"}]]. Türler: call(name), sms(name,text), wa(name,text), alarm(h,m), timer(sec), torch(on:true/false), volume(level 0-100), open(app), nav(q), settings(page: wifi|bluetooth|location|airplane|display|sound|battery). Eylemi yalnızca kullanıcı açıkça isterse ekle; sohbet cevabında ekleme.':'';
+const ACT_SYS=NATIVE?' Telefonu kontrol edebilirsin. Kullanıcı bir eylem istediğinde (arama, mesaj, alarm, fener, ses, uygulama açma, navigasyon, ayarlar) kısa cevabının sonuna TEK satır ekle: [[EYLEM {"t":"call","name":"Ahmet"}]]. Türler: call(name), sms(name,text), wa(name,text), alarm(h,m), timer(sec), torch(on:true/false), volume(level 0-100), open(app), nav(q), settings(page: wifi|bluetooth|location|airplane|display|sound|battery). Türler ayrıca: agent(goal) — ekrandaki uygulamalarda birden çok adım gereken HER iş için (WhatsApp araması veya mesajı, Instagram, uygulama içi işlem, ayar değiştirme, formlar...) {"t":"agent","goal":"ayrıntılı görev"} kullan; telefonun tamamını sen kullanırsın. Eylemi yalnızca kullanıcı açıkça isterse ekle; sohbet cevabında ekleme.':'';
 let models={};
 function tfetch(u,o,ms){const c=new AbortController(),h=setTimeout(()=>c.abort(),ms||25000);return fetch(u,{...o,signal:c.signal}).catch(e=>{throw new Error(e.name==='AbortError'?'zaman aşımı':e.message)}).finally(()=>clearTimeout(h))}
 let rawG=null;async function gAll(){if(rawG)return rawG;const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200',{headers:{'x-goog-api-key':S.kG}},15000);if(!r.ok)throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,120));rawG=(await r.json()).models||[];return rawG}
@@ -443,8 +443,37 @@ async function actCall(name){const r=await pickContact(name,'call');return r.err
 async function smsFlow(c,text){if(!text){pend={t:'smsText',c};return 'Ne yazayım?'}pend={t:'smsConfirm',c,text};return c.name+' kişisine şunu göndereyim mi: '+text+' ?'}
 async function actSms(name,text){const r=await pickContact(name,'sms',text);return r.err||await smsFlow(r.c,text)}
 async function actWa(name,text){const r=await pickContact(name,'wa',text);if(r.err)return r.err;return await waOpen(r.c,text)}
-async function waOpen(c,text){let n=(c.number||'').replace(/\D/g,'');if(n.length===11&&n[0]==='0')n='9'+n;else if(n.length===10)n='90'+n;try{await PL('AppLauncher').openUrl({url:'https://wa.me/'+n+(text?'?text='+encodeURIComponent(text):'')})}catch(e){return'WhatsApp açılamadı.'}return c.name+' için WhatsApp açıldı'+(text?', gönder tuşuna bas.':'.')}
+async function waOpen(c,text){let n=(c.number||'').replace(/\D/g,'');if(n.length===11&&n[0]==='0')n='9'+n;else if(n.length===10)n='90'+n;try{await PL('AppLauncher').openUrl({url:'https://wa.me/'+n+(text?'?text='+encodeURIComponent(text):'')})}catch(e){return'WhatsApp açılamadı.'}if(text&&await accOn()){await sleep(2500);let o=await PL('JarvisView').act({a:'click',text:'Gönder'});if(!(o&&o.ok))o=await PL('JarvisView').act({a:'click',text:'Send'});if(o&&o.ok)return c.name+' kişisine gönderdim.'}return c.name+' için WhatsApp açıldı'+(text?', gönder tuşuna bas.':'.')}
 const fm=(h,m)=>String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function accOn(){try{const r=await PL('JarvisView').accState();return!!(r&&r.on)}catch(e){return false}}
+async function scr(){try{const r=await PL('JarvisView').screen();return JSON.parse(r.nodes||'{"pkg":"","n":[]}')}catch(e){return{pkg:'',n:[]}}}
+async function llmJson(sys,user){let err;
+  if(S.kG){try{const m=(await gList())[0];const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/'+m+':generateContent',{method:'POST',headers:{'x-goog-api-key':S.kG,'content-type':'application/json'},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:user}]}],generationConfig:{responseMimeType:'application/json',thinkingConfig:{thinkingBudget:0}}})},12000);if(!r.ok)throw new Error('Gemini '+r.status);const j=await r.json();const x=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();if(x)return x}catch(e){err=e}}
+  if(S.kD){const m=(await dList())[0];const r=await tfetch('https://api.deepseek.com/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+S.kD,'content-type':'application/json'},body:JSON.stringify({model:m,response_format:{type:'json_object'},messages:[{role:'system',content:sys},{role:'user',content:user}]})},20000);if(!r.ok)throw new Error('DeepSeek '+r.status);const j=await r.json();return(j.choices?.[0]?.message?.content||'').trim()}
+  throw err||new Error('anahtar yok')}
+const AG_SYS='Bir Android telefonu erişilebilirlik ile adım adım kullanıyorsun. Her adımda SADECE tek bir JSON döndür: {"a":"click|type|scroll|back|home|open|wait|done|fail","text":"","idx":-1,"dir":"down","say":"kısa Türkçe açıklama"}. Ekran listesi satırları: idx|T(tıklanabilir)E(yazılabilir)|metin. click için listedeki idx kullan (yoksa text ver). type için text yaz (idx yazılabilir kutu). open için uygulama adını text olarak ver. Hedef bittiğinde done, olmayacaksa fail ver ve say alanına sonucu yaz. Aynı adımı tekrar tekrar deneme. WhatsApp mesajı yazınca Gönder/Send düğmesine tıkla. WhatsApp aramada sohbeti açıp Sesli arama/Voice call düğmesine tıkla. Para gönderme, satın alma, silme, hesap veya şifre değiştirme gibi geri alınamaz işlemleri YAPMA; fail ver ve nedenini söyle.';
+let agentOn=false;
+async function agent(goal){
+  if(!goal)return'';const J=PL('JarvisView');
+  if(!await accOn())return'Bunun için erişilebilirlik iznini vermen lazım. Ayarlarda "erişilebilirlik izni ver" düğmesine bas ve Jarvis\'i aç.';
+  if(agentOn)return'Zaten bir işle uğraşıyorum.';agentOn=true;try{await J.keep({on:true})}catch(e){}
+  const hist=[];let res='';
+  try{for(let i=0;i<16;i++){
+    const sc=await scr();const lines=(sc.n||[]).map(n=>n.i+'|'+(n.c?'T':'')+(n.e?'E':'')+'|'+n.t).join('\n');
+    let raw,a;try{raw=await llmJson(AG_SYS,'GÖREV: '+goal+'\nÖNCEKİ ADIMLAR: '+(hist.join(' ; ')||'yok')+'\nAÇIK UYGULAMA: '+(sc.pkg||'bilinmiyor')+'\nEKRAN:\n'+lines);a=JSON.parse(raw.replace(/^```json|```$/g,''))}catch(e){res='Beynime ulaşamadım: '+String(e&&e.message||e).slice(0,60);break}
+    lastAct=Date.now();log('s','▸ '+(a.say||a.a));
+    if(a.a==='done'){res=a.say||'Tamam, yaptım.';break}
+    if(a.a==='fail'){res=a.say||'Yapamadım.';break}
+    let r='';
+    if(a.a==='open'){const o=await J.openApp({name:a.text||''});r=o&&o.ok?'ok':'uygulama yok'}
+    else if(a.a==='wait'){r='ok'}
+    else{const o=await J.act({a:a.a,text:a.text||'',idx:(a.idx==null?-1:+a.idx),dir:a.dir||'down'});r=(o&&o.msg)||''}
+    hist.push((a.a||'')+(a.text?':'+a.text:'')+(a.idx>=0?'#'+a.idx:'')+' → '+r);
+    await sleep(a.a==='open'?2500:1300)}
+    if(!res)res='Çok uzun sürdü, yarıda bıraktım.'}
+  finally{agentOn=false;try{await J.keep({on:false})}catch(e){}}
+  return res}
 async function execAct(a){const J=PL('JarvisView');if(!J||!a)return'';try{switch(a.t){
   case'call':return await actCall(a.name||'');case'sms':return await actSms(a.name||'',a.text||'');case'wa':return await actWa(a.name||'',a.text||'');
   case'alarm':{const h=+a.h,m=+(a.m||0);if(!(h>=0&&h<24))return'';await J.alarm({hour:h,minutes:m});return'Alarm '+fm(h,m)+' için kuruldu.'}
@@ -453,7 +482,8 @@ async function execAct(a){const J=PL('JarvisView');if(!J||!a)return'';try{switch
   case'volume':{const r=await J.volume(a.level!=null?{level:+a.level}:{delta:+a.delta||0});return'Ses yüzde '+r.pct+'.'}
   case'open':{const r=await J.openApp({name:a.app||''});return r&&r.ok?(r.label+' açılıyor.'):(a.app+' uygulamasını bulamadım.')}
   case'nav':await J.navigate({q:a.q||''});return'Navigasyon açılıyor.';
-  case'settings':await J.settings({page:a.page||''});return'Ayar sayfasını açtım.';}}catch(e){return'Yapamadım: '+String(e&&e.message||e).slice(0,80)}return''}
+  case'settings':await J.settings({page:a.page||''});return'Ayar sayfasını açtım.';
+  case'agent':return await agent(a.goal||'');}}catch(e){return'Yapamadım: '+String(e&&e.message||e).slice(0,80)}return''}
 async function phoneCmd(l,t){const J=PL('JarvisView');let m;
   if(pend){const P=pend;pend=null;
     if(/^(vazgeç|iptal|hayır|yok|boşver|gönderme|durdur)/.test(l))return'Tamam, iptal.';
@@ -463,8 +493,9 @@ async function phoneCmd(l,t){const J=PL('JarvisView');let m;
     if(P.t==='smsConfirm'){if(/^(evet|gönder|tamam|olur|yolla|aynen|onaylıyorum)/.test(l)){const r=await J.sms({number:P.c.number,text:P.text,send:true});return r&&r.sent?'Gönderdim.':'Mesaj uygulaması açıldı, gönder tuşuna bas.'}return'Tamam, göndermedim.'}}
   m=l.match(/^(.+?)['’]?\s*(?:ye|ya|e|a|na|ne)\s+(whatsapp\w*|sms|mesaj)\s*(?:at|gönder|yaz|yolla)\w*[:,]?\s*(.*)$/);
   if(m){const txt=(t.match(/(?:at|gönder\w*|yaz\w*|yolla\w*)[:,]?\s+(.+)$/i)||[])[1]||'';return/^whatsapp/.test(m[2])?await actWa(m[1],txt):await actSms(m[1],txt)}
+  if(/whats?app|vatsap/.test(l)&&/\bara(sın|r mısın|sana)?\b|arama/.test(l)&&!/mesaj|yaz/.test(l))return await agent('Kullanıcı şunu istedi: "'+t+'". WhatsApp\'ta ilgili kişiyi bul, sohbetini aç ve sesli ara.');
   if(!/google|youtube|internet|haritada|bing|araştır|ekran|hologram/.test(l)){
-    m=l.match(/^(?:lütfen\s+)?(.+?)\s+(?:ara|arar mısın|arasana|aramak istiyorum|aransın)$/)||l.match(/^ara\s+(.+)$/);if(m&&m[1].length<30)return await actCall(m[1])}
+    m=l.match(/^(?:lütfen\s+)?(.+?)\s+(?:ara|arar mısın|arasana|aramak istiyorum|aransın)$/)||l.match(/^ara\s+(.+)$/);if(m&&m[1].length<30)return await actCall(m[1].replace(/\s*(kişisini|kişisi|numarasını|numarası|rehberden)\s*$/,'').trim())}
   if(/alarm/.test(l)&&/kur|ayarla|çal|ekle/.test(l)){const mm=l.match(/(\d{1,2})\s*[:.]\s*(\d{2})/)||l.match(/(\d{1,2})/);if(mm){let h=+mm[1],mi=mm[2]&&mm[2].length===2?+mm[2]:0;if(/buçuk/.test(l))mi=30;if(/akşam|öğleden sonra|gece/.test(l)&&h<12)h+=12;if(h<24)return await execAct({t:'alarm',h,m:mi})}}
   if(/(el feneri|fener|flaş)/.test(l))return await execAct({t:'torch',on:!/kapat|söndür/.test(l)});
   if(/\bses(i|in)?\b|müzik sesi/.test(l)&&/(artır|yükselt|aç\b|fazla|kıs|azalt|düşür|alçalt|kapat|sessiz|yap|ayarla|yüzde|en yüksek|full|maksimum|\d)/.test(l)&&!/ses ayar/.test(l)){const n=l.match(/(\d{1,3})/);
@@ -514,7 +545,7 @@ $('go').onclick=async()=>{
 };
 if(!SR&&!NATIVE)$('bMic').style.display='none';
 function closePanel(){stopSpeech();stopRec();try{PL('JarvisView').finish()}catch(e){}}
-async function initMode(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{const r=await J.mode();if(r&&r.mode==='mini'){MINI=true;document.body.classList.add('mini');$('start').style.display='none';started=true;conv=true;setConv();lastAct=Date.now();const t0=Date.now();setInterval(()=>{muteBeep(3000);if((!busy&&!speaking&&Date.now()-lastAct>10000)||Date.now()-t0>90000)closePanel()},1500);setTimeout(()=>say('Dinliyorum.'),250)}else{if(S.wake)applyWake()}}catch(e){}}
+async function initMode(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{const r=await J.mode();if(r&&r.mode==='mini'){MINI=true;document.body.classList.add('mini');$('start').style.display='none';started=true;conv=true;setConv();lastAct=Date.now();const t0=Date.now();setInterval(()=>{muteBeep(3000);if((!busy&&!speaking&&Date.now()-lastAct>10000)||Date.now()-t0>200000)closePanel()},1500);setTimeout(()=>say('Dinliyorum.'),250)}else{if(S.wake)applyWake()}}catch(e){}}
 initMode();
 window.__jv={feed(h,t){procHands(h,t)},get st(){return{conv,exT,yawT,zoomT,pitchT,holoT,glabel}},holo(v){holoName='armor';holoT=v;holoA=v;exT=0}};
 </script>
