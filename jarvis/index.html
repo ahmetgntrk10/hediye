@@ -108,7 +108,7 @@ async function gemSpeak(t){
 async function playPCM(b64){
   const bin=atob(b64),n=bin.length>>1,buf=new Int16Array(n);for(let i=0;i<n;i++)buf[i]=bin.charCodeAt(i*2)|(bin.charCodeAt(i*2+1)<<8);
   AC=AC||new(window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')await AC.resume();
-  const ab=AC.createBuffer(1,n,24000),ch=ab.getChannelData(0);for(let i=0;i<n;i++)ch[i]=buf[i]/32768;
+  const pad=3600,ab=AC.createBuffer(1,n+pad,24000),ch=ab.getChannelData(0);for(let i=0;i<n;i++)ch[i]=buf[i]/32768;const fd=Math.min(720,n>>1);for(let i=0;i<fd;i++){ch[i]*=i/fd;ch[n-1-i]*=i/fd}
   return new Promise(res=>{const src=AC.createBufferSource();src.buffer=ab;src.connect(AC.destination);curSrc=src;src.onended=()=>{curSrc=null;res()};src.start()})}
 function after(){speaking=false;lastAct=Date.now();setState('idle');if(S.always)awakeUntil=Date.now()+15000;setTimeout(()=>{if(conv||S.always||awakeUntil>Date.now())listenOnce()},250)}
 async function say(text){
@@ -129,6 +129,7 @@ async function listenNative(){const SN=PL('SpeechRecognition');if(recOn||speakin
   try{const r=await SN.start({language:'tr-TR',maxResults:1,partialResults:false,popup:false});t=((r&&r.matches&&r.matches[0])||'').trim()}catch(e){if(/permission|izin/i.test(String(e&&e.message||e))){msg('Mikrofon izni verilmedi.');conv=false;setConv()}}
   recOn=false;if(t){emptyN=0;handleSpeech(t)}else{setState('idle');if(MINI&&++emptyN>=2){closePanel();return}if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}}
 function listenOnce(){
+  if(bgOff)return;
   if(NATIVE&&PL('SpeechRecognition'))return listenNative();
   if(!SR){msg('Bu tarayıcıda ses tanıma yok. Yazarak kullan.');return}
   if(recOn||speaking)return;
@@ -138,7 +139,9 @@ function listenOnce(){
   rec.onend=()=>{recOn=false;rec=null;const t=fin.trim();if(t){handleSpeech(t)}else{setState('idle');if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}};
   try{rec.start()}catch(e){recOn=false}
 }
-function applyListen(){if(S.always)listenOnce();else stopRec()}
+document.addEventListener('visibilitychange',()=>{if(MINI)return;if(document.hidden){stopSpeech();stopRec();bgOff=true}else if(bgOff){bgOff=false;if(started)applyListen()}});
+let bgOff=false;
+function applyListen(){if(bgOff)return;if(S.always)listenOnce();else stopRec()}
 function handleSpeech(t){
   t=t.replace(/^\s*(hey\s+|hey,?\s*)?(jarvis|jarvıs|cervis|çarvis|carvis|jarviz)[,.!]?\s*/i,'')||t;const low=t.toLowerCase();const wake=/(jarvis|jarvıs|cervis|çarvis|carvis)/i;
   if(S.always&&!S.all&&!conv&&awakeUntil<Date.now()){ if(!wake.test(low)){setState('idle');setTimeout(listenOnce,300);return} t=t.replace(/(hey\s+|hey,?\s*)?(jarvis|jarvıs|cervis|çarvis|carvis)[,.!]?\s*/i,'').trim(); if(!t){wakeUp();return} }
@@ -196,7 +199,7 @@ const ACT_SYS=NATIVE?' Telefonu kontrol edebilirsin. Kullanıcı bir eylem isted
 let models={};
 function tfetch(u,o,ms){const c=new AbortController(),h=setTimeout(()=>c.abort(),ms||25000);return fetch(u,{...o,signal:c.signal}).catch(e=>{throw new Error(e.name==='AbortError'?'zaman aşımı':e.message)}).finally(()=>clearTimeout(h))}
 let rawG=null;async function gAll(){if(rawG)return rawG;const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200',{headers:{'x-goog-api-key':S.kG}},15000);if(!r.ok)throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,120));rawG=(await r.json()).models||[];return rawG}
-async function gList(){if(models.g)return models.g;const all=await gAll();const j={models:all};
+async function gList(){if(models.g)return models.g;if(S.fast){let fm='';try{fm=store.get('gm','')}catch(e){}models.g=[...new Set([fm||'models/gemini-flash-latest','models/gemini-flash-latest','models/gemini-flash-lite-latest'])];return models.g}const all=await gAll();const j={models:all};
   const bad=/embedding|imagen|image|tts|live|audio|aqa|veo|robotics|computer|learnlm|gemma|exp|customtools|native|dialog|thinking-\d|latest/i;
   const c=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/gemini/i.test(m.name)&&!bad.test(m.name));
   const sc=m=>{const v=parseFloat((m.name.match(/gemini-(\d+(?:\.\d+)?)/)||[])[1]||0),n=m.name;const tier=S.fast?(/lite/.test(n)?5:/flash/.test(n)?30:/pro/.test(n)?10:0):(/pro/.test(n)?30:/lite/.test(n)?5:/flash/.test(n)?20:0);return(S.fast?tier*1000+v*10:v*1000+tier)-(/preview/.test(n)?100000:0)};
@@ -205,13 +208,13 @@ async function dList(){if(models.d)return models.d;const r=await tfetch('https:/
   const pref=S.fast?['chat','v3','reasoner']:['reasoner','chat'];models.d=ids.sort((a,b)=>{const f=x=>{const i=pref.findIndex(p=>x.includes(p));return i<0?9:i};return f(a)-f(b)});if(!models.d.length)throw new Error('DeepSeek modeli bulunamadı');return models.d}
 async function viaGemini(text,h,img,web){const list=await gList();let err;const T0=Date.now(),LIM=S.fast?28000:60000;
   const contents=h.map(x=>({role:x.r==='u'?'user':'model',parts:[{text:x.t}]}));const parts=[{text}];if(img)parts.unshift({inlineData:{mimeType:'image/jpeg',data:img}});contents.push({role:'user',parts});
-  for(const m of list.slice(0,4)){
+  for(const m of list.slice(0,S.fast?2:4)){
     const variants=[];const pro=/pro/.test(m);
     const base={systemInstruction:{parts:[{text:SYS+ACT_SYS}]},contents},nt={generationConfig:{thinkingConfig:{thinkingBudget:0}}};
     if(web){if(!pro&&S.fast)variants.push({...base,...nt,tools:[{google_search:{}}]});variants.push({...base,tools:[{google_search:{}}]})}
     if(!pro&&S.fast)variants.push({...base,...nt});
     variants.push(base);
-    for(const body of variants){const left=LIM-(Date.now()-T0);if(left<2500){throw err||new Error('zaman aşımı')}try{log('s','deniyorum: '+m.replace('models/','')+(body.tools?' + web':''));const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/'+m+':generateContent',{method:'POST',headers:{'x-goog-api-key':S.kG,'content-type':'application/json'},body:JSON.stringify(body)},Math.min(S.fast?10000:30000,left));if(!r.ok)throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,140));const j=await r.json();const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();if(!t)throw new Error('boş cevap');return{text:t,engine:'Gemini'+(body.tools?' + web':''),model:m.replace('models/','')}}catch(e){err=e;log('s','  → '+e.message.slice(0,90));if(!/ 400/.test(e.message))break}}
+    for(const body of variants){const left=LIM-(Date.now()-T0);if(left<2500){throw err||new Error('zaman aşımı')}try{log('s','deniyorum: '+m.replace('models/','')+(body.tools?' + web':''));const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/'+m+':generateContent',{method:'POST',headers:{'x-goog-api-key':S.kG,'content-type':'application/json'},body:JSON.stringify(body)},Math.min(S.fast?8000:30000,left));if(!r.ok)throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,140));const j=await r.json();const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();if(!t)throw new Error('boş cevap');try{store.set('gm',m)}catch(e){}return{text:t,engine:'Gemini'+(body.tools?' + web':''),model:m.replace('models/','')}}catch(e){err=e;log('s','  → '+e.message.slice(0,90));if(!/ 400/.test(e.message))break}}
     if(/ 40[13]/.test(err.message)&&!/quota|limit|exhaust/i.test(err.message))break}
   throw err}
 async function viaDeep(text,h){const list=await dList();let err;const msgs=[{role:'system',content:SYS+ACT_SYS},...h.map(x=>({role:x.r==='u'?'user':'assistant',content:x.t})),{role:'user',content:text}];

@@ -629,7 +629,7 @@ jobs:
               events++;
               String hh = t.replaceAll("[^a-z\\[\\] ]", "").replace("partial", "").replace("text", "").trim();
               if (hh.length() > 0) heard = hh;
-              boolean hit = t.contains("jarvis") || ((t.contains("hey") || t.contains("hay")) && (t.contains("assist") || t.contains("a system") || t.contains("asistan")));
+              boolean hit = t.contains("jarvis") || t.contains("assistant") || t.contains("assistance") || t.contains("a system") || t.contains("asistan");
               if (hit) {
                 long now = System.currentTimeMillis();
                 if (now - lastWake < 2500) return;
