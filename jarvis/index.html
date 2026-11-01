@@ -41,9 +41,9 @@ body.holo #log,body.holo #log+*{transition:.4s}body.holo #log{opacity:0;pointer-
 body.mini,html:has(body.mini){background:transparent}
 body.mini #top,body.mini #log,body.mini #bar,body.mini #cam,body.mini #start,body.mini #hs,body.mini #msg{display:none!important}
 #mini{display:none}
-body.mini #mini{display:block;position:fixed;left:10px;right:10px;bottom:12px;height:160px;border-radius:28px;background:rgba(9,13,26,.9);border:1px solid rgba(120,160,255,.28);box-shadow:0 10px 40px rgba(0,0,0,.5);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);padding:18px 20px 18px 112px;overflow:hidden}
+body.mini #mini{display:block;position:fixed;left:10px;right:10px;bottom:12px;height:215px;border-radius:28px;background:rgba(9,13,26,.9);border:1px solid rgba(120,160,255,.28);box-shadow:0 10px 40px rgba(0,0,0,.5);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);padding:18px 20px 18px 112px;overflow:hidden}
 #mu{font:600 12px var(--mono);color:#7d9be0;letter-spacing:.04em;min-height:16px;margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#mj{font:500 16px/1.4 system-ui,sans-serif;color:#fff;max-height:100px;overflow:hidden}
+#mj{font:500 16px/1.4 system-ui,sans-serif;color:#fff;height:150px;overflow-y:auto;-webkit-overflow-scrolling:touch}
 #msg{position:fixed;z-index:25;left:14px;right:14px;top:70px;color:#ffb066;font:12px var(--mono);text-align:center;pointer-events:none}
 </style>
 </head>
@@ -107,7 +107,7 @@ let voice=null;function pickVoice(){const v=speechSynthesis.getVoices();voice=v.
 if('speechSynthesis' in window){pickVoice();speechSynthesis.onvoiceschanged=pickVoice}
 function clean(t){return t.replace(/```[\s\S]*?```/g,' ').replace(/[*_#`>~]/g,'').replace(/\[(.*?)\]\(.*?\)/g,'$1').replace(/https?:\/\/\S+/g,'bağlantı').replace(/\s+/g,' ').trim()}
 let curSrc=null,AC=null;
-function stopSpeech(){try{speechSynthesis.cancel()}catch(e){}if(curSrc){try{curSrc.onended=null;curSrc.stop()}catch(e){}curSrc=null}speaking=false}
+function stopSpeech(){try{speechSynthesis.cancel()}catch(e){}try{PL('JarvisView').ttsStop()}catch(e){}if(curSrc){try{curSrc.onended=null;curSrc.stop()}catch(e){}curSrc=null}speaking=false}
 async function gemSpeak(t){
   const r0=await gAll();const tts=r0.filter(m=>/tts/i.test(m.name)&&(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>m.name).sort((a,b)=>{const v=x=>parseFloat((x.match(/(\d+(?:\.\d+)?)-/)||[])[1]||0);return v(b)-v(a)||(/flash/.test(b)?1:0)-(/flash/.test(a)?1:0)});
   if(!tts.length)throw new Error('ses modeli yok');let err;
@@ -121,7 +121,8 @@ function after(){speaking=false;lastAct=Date.now();setState('idle');if(S.always)
 async function say(text){
   const t=clean(text);if(!t){return}
   stopSpeech();stopRec();speaking=true;lastAct=Date.now();setState('speak');
-  if(S.vo==='gemini'&&S.kG){try{const d=await gemSpeak(t.slice(0,600));if(!speaking)return;await playPCM(d);if(speaking)after();return}catch(e){log('s','Gemini sesi olmadı ('+e.message+'), telefon sesine geçtim.');if(!speaking)return}}
+  if(S.vo==='gemini'&&S.kG&&navigator.onLine!==false){try{const d=await gemSpeak(t.slice(0,600));if(!speaking)return;await playPCM(d);if(speaking)after();return}catch(e){log('s','Gemini sesi olmadı ('+e.message+'), telefon sesine geçtim.');if(!speaking)return}}
+  if(NATIVE&&PL('JarvisView')){try{await PL('JarvisView').ttsSpeak({text:t});if(speaking)after();return}catch(e){log('s','Telefon sesi olmadı: '+(e&&e.message||e))}}
   if(!('speechSynthesis' in window)){after();return}
   return new Promise(res=>{const parts=t.match(/[^.!?\n]+[.!?]?/g)||[t];let i=0;let fin=false;
     const done=()=>{if(fin)return;fin=true;clearTimeout(wd);after();res()};let wd=setTimeout(done,Math.min(60000,t.length*120+4000));
@@ -528,7 +529,7 @@ function orb(now){
   rot+=(rotT-rot)*.08;zoom+=(zoomT-zoom)*.08;pulse*=.94;holoA+=(holoT-holoA)*.07;document.body.classList.toggle('holo',holoT>0);if(!dragging&&!handNow&&spinOn){yawT+=.004}yaw+=(yawT-yaw)*.12;pitch+=(pitchT-pitch)*.12;ex+=(exT-ex)*.1;
   const target=state==='speak'?.5+.5*Math.sin(t*14)*Math.sin(t*5.3)+.2:state==='listen'?.35+.2*Math.sin(t*3):.08;lvl+=(target-lvl)*.15;
   g.setTransform(DPR,0,0,DPR,0,0);if(MINI)g.clearRect(0,0,W,H);else{g.fillStyle='rgba(4,6,11,.28)';g.fillRect(0,0,W,H)}
-  let hv=holoA,cx=W/2,cy=H*(.4-.3*hv),R=Math.min(W,H)*.26*(1-.7*hv)*(hv>.5?1:zoom)*(1+pulse*.15+lvl*.06),c=`${cur[0]|0},${cur[1]|0},${cur[2]|0}`;if(MINI){hv=0;cx=62;cy=H-92;R=34*(1+pulse*.15+lvl*.12)}
+  let hv=holoA,cx=W/2,cy=H*(.4-.3*hv),R=Math.min(W,H)*.26*(1-.7*hv)*(hv>.5?1:zoom)*(1+pulse*.15+lvl*.06),c=`${cur[0]|0},${cur[1]|0},${cur[2]|0}`;if(MINI){hv=0;cx=62;cy=H-110;R=34*(1+pulse*.15+lvl*.12)}
   g.globalCompositeOperation='lighter';
   if(hv>.02){const hc=H*.5,hs=Math.min(W*.19,H*.062)*zoom*(holoName==='armor'?1:1.5);if(holoName==='armor'||holoName==='helmet'){g.globalCompositeOperation='source-over';drawMesh(g,W/2,hc,hs*(holoName==='helmet'?2.1:1),t,hv,holoName==='armor'?SUIT:HELM,holoName==='armor'?.4:4.4);g.globalCompositeOperation='lighter'}else drawHolo(g,W/2,hc,hs,t,hv);drawHands(g,hv);g.fillStyle='rgba(90,200,255,'+.5*hv+')';g.font='600 10px ui-monospace,monospace';g.textAlign='center';g.fillText((holoName==='armor'?'EXO-1 PROTOTIP':holoName==='helmet'?'EXO-1 KASK':holoName.toUpperCase())+' · '+Math.round(ex*100)+'% EXPLODED',W/2,H*.2)}
   const gr=g.createRadialGradient(cx,cy,R*.1,cx,cy,R*1.9);gr.addColorStop(0,`rgba(${c},${.22+lvl*.25})`);gr.addColorStop(1,`rgba(${c},0)`);g.fillStyle=gr;g.fillRect(0,0,W,H);

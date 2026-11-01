@@ -492,6 +492,42 @@ jobs:
               else sp.edit().putBoolean("spkOnly", call.getBoolean("on", false)).apply();
               call.resolve();
             }
+            private android.speech.tts.TextToSpeech tts;
+            private boolean ttsReady = false;
+            private final java.util.Map<String, PluginCall> ttsCalls = new java.util.HashMap<String, PluginCall>();
+            private void speakNow(PluginCall call, String text) {
+              if (!ttsReady) { call.reject("ses motoru yok"); return; }
+              String id = String.valueOf(System.nanoTime());
+              ttsCalls.put(id, call);
+              tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, id);
+            }
+            @PluginMethod
+            public void ttsSpeak(final PluginCall call) {
+              final String text = call.getString("text", "");
+              if (tts == null) {
+                tts = new android.speech.tts.TextToSpeech(getContext().getApplicationContext(), new android.speech.tts.TextToSpeech.OnInitListener() {
+                  public void onInit(int st) {
+                    ttsReady = st == android.speech.tts.TextToSpeech.SUCCESS;
+                    if (ttsReady) {
+                      tts.setLanguage(new java.util.Locale("tr", "TR"));
+                      tts.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
+                        public void onStart(String id) {}
+                        public void onDone(String id) { PluginCall c = ttsCalls.remove(id); if (c != null) c.resolve(); }
+                        public void onError(String id) { PluginCall c = ttsCalls.remove(id); if (c != null) c.resolve(); }
+                      });
+                    }
+                    speakNow(call, text);
+                  }
+                });
+              } else speakNow(call, text);
+            }
+            @PluginMethod
+            public void ttsStop(PluginCall call) {
+              try { if (tts != null) tts.stop(); } catch (Exception e) {}
+              for (PluginCall c : new java.util.ArrayList<PluginCall>(ttsCalls.values())) c.resolve();
+              ttsCalls.clear();
+              call.resolve();
+            }
             @PluginMethod
             public void accState(PluginCall call) {
               JSObject r = new JSObject();
@@ -1069,11 +1105,12 @@ jobs:
               WakeService.setPaused(true);
               Window w = getWindow();
               w.setGravity(Gravity.BOTTOM);
-              int h = (int) (230 * getResources().getDisplayMetrics().density);
+              int h = (int) (290 * getResources().getDisplayMetrics().density);
               w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, h);
               w.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
               w.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH);
               try { getBridge().getWebView().setBackgroundColor(Color.TRANSPARENT); } catch (Exception e) {}
+              try { getBridge().getWebView().getSettings().setMediaPlaybackRequiresUserGesture(false); } catch (Exception e) {}
             }
             @Override
             public boolean onTouchEvent(MotionEvent e) {
