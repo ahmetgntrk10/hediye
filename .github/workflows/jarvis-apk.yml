@@ -529,6 +529,52 @@ jobs:
               call.resolve();
             }
             @PluginMethod
+            public void notifOn(PluginCall call) {
+              JSObject r = new JSObject();
+              r.put("on", JarvisNotif.inst != null);
+              call.resolve(r);
+            }
+            @PluginMethod
+            public void notifSettings(PluginCall call) {
+              try {
+                getContext().startActivity(newTask(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
+                call.resolve();
+              } catch (Exception e) { fail(call, e); }
+            }
+            @PluginMethod
+            public void notifs(PluginCall call) {
+              JSObject r = new JSObject();
+              r.put("on", JarvisNotif.inst != null);
+              r.put("list", JarvisNotif.inst == null ? "[]" : JarvisNotif.inst.listJson());
+              call.resolve(r);
+            }
+            @PluginMethod
+            public void callAnswer(PluginCall call) {
+              try {
+                if (androidx.core.content.ContextCompat.checkSelfPermission(getContext(), "android.permission.ANSWER_PHONE_CALLS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                  androidx.core.app.ActivityCompat.requestPermissions(getActivity(), new String[] { "android.permission.ANSWER_PHONE_CALLS" }, 91);
+                  call.reject("izin istendi, izin verip tekrar söyle");
+                  return;
+                }
+                ((android.telecom.TelecomManager) getContext().getSystemService(Context.TELECOM_SERVICE)).acceptRingingCall();
+                call.resolve();
+              } catch (Exception e) { fail(call, e); }
+            }
+            @PluginMethod
+            public void callEnd(PluginCall call) {
+              try {
+                if (androidx.core.content.ContextCompat.checkSelfPermission(getContext(), "android.permission.ANSWER_PHONE_CALLS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                  androidx.core.app.ActivityCompat.requestPermissions(getActivity(), new String[] { "android.permission.ANSWER_PHONE_CALLS" }, 91);
+                  call.reject("izin istendi, izin verip tekrar söyle");
+                  return;
+                }
+                boolean ok = ((android.telecom.TelecomManager) getContext().getSystemService(Context.TELECOM_SERVICE)).endCall();
+                JSObject r = new JSObject();
+                r.put("ok", ok);
+                call.resolve(r);
+              } catch (Exception e) { fail(call, e); }
+            }
+            @PluginMethod
             public void accState(PluginCall call) {
               JSObject r = new JSObject();
               r.put("on", JarvisAccess.inst != null);
@@ -971,6 +1017,7 @@ jobs:
             String doAct(String a, String text, int idx, String dir, int x, int y) {
               try {
                 if (a.equals("back")) return performGlobalAction(GLOBAL_ACTION_BACK) ? "ok geri" : "olmadı";
+                if (a.equals("quick")) return performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS) ? "ok hızlı ayarlar" : "olmadı";
                 if (a.equals("home")) return performGlobalAction(GLOBAL_ACTION_HOME) ? "ok ana ekran" : "olmadı";
                 if (a.equals("recents")) return performGlobalAction(GLOBAL_ACTION_RECENTS) ? "ok son uygulamalar" : "olmadı";
                 if (a.equals("notifications")) return performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS) ? "ok bildirimler" : "olmadı";
@@ -1019,6 +1066,54 @@ jobs:
           XML
           RS=android/app/src/main/res/values/strings.xml
           sed -i 's#</resources>#<string name="jarvis_acc_desc">Jarvis, sesli komutlarinla telefondaki uygulamalari senin yerine kullanir.</string></resources>#' $RS
+          cat > $D/JarvisNotif.java <<'JAVA'
+          package com.tapverse.jarvis;
+          import android.app.Notification;
+          import android.content.pm.PackageManager;
+          import android.os.Bundle;
+          import android.service.notification.NotificationListenerService;
+          import android.service.notification.StatusBarNotification;
+          public class JarvisNotif extends NotificationListenerService {
+            static JarvisNotif inst;
+            @Override
+            public void onListenerConnected() { inst = this; }
+            @Override
+            public void onListenerDisconnected() { inst = null; }
+            private String esc(String s) {
+              return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ").replace("\t", " ");
+            }
+            String listJson() {
+              StringBuilder sb = new StringBuilder("[");
+              try {
+                StatusBarNotification[] arr = getActiveNotifications();
+                PackageManager pm = getPackageManager();
+                int c = 0;
+                for (StatusBarNotification sbn : arr) {
+                  Notification n = sbn.getNotification();
+                  if (n == null) continue;
+                  if ((n.flags & Notification.FLAG_ONGOING_EVENT) != 0) continue;
+                  if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) continue;
+                  if (sbn.getPackageName().equals(getPackageName())) continue;
+                  Bundle e = n.extras;
+                  CharSequence t = e.getCharSequence(Notification.EXTRA_TITLE);
+                  CharSequence x = e.getCharSequence(Notification.EXTRA_TEXT);
+                  if (x == null && t == null) continue;
+                  String app = sbn.getPackageName();
+                  try { app = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(sbn.getPackageName(), 0))); } catch (Exception e2) {}
+                  String tt = t == null ? "" : t.toString();
+                  String xx = x == null ? "" : x.toString();
+                  if (xx.length() > 140) xx = xx.substring(0, 140);
+                  if (c > 0) sb.append(",");
+                  sb.append("{\"app\":\"" + esc(app) + "\",\"title\":\"" + esc(tt) + "\",\"text\":\"" + esc(xx) + "\"}");
+                  c++;
+                  if (c >= 12) break;
+                }
+              } catch (Exception e) {}
+              sb.append("]");
+              return sb.toString();
+            }
+          }
+          JAVA
           cat > $D/JarvisInteractionService.java <<'JAVA'
           package com.tapverse.jarvis;
           import android.service.voice.VoiceInteractionService;
@@ -1127,8 +1222,8 @@ jobs:
           }
           JAVA
           M=android/app/src/main/AndroidManifest.xml
-          sed -i 's#<uses-permission android:name="android.permission.VIBRATE"/>#<uses-permission android:name="android.permission.VIBRATE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/><uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/><uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>#' $M
-          sed -i 's#</application>#<activity android:name=".OverlayActivity" android:theme="@style/OverlayTheme" android:launchMode="singleTask" android:excludeFromRecents="true" android:taskAffinity="" android:exported="false" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"/><service android:name=".JarvisInteractionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"><intent-filter><action android:name="android.service.voice.VoiceInteractionService"/></intent-filter><meta-data android:name="android.voice_interaction" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisSessionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"/><service android:name=".JarvisRecognizer" android:exported="true"><intent-filter><action android:name="android.speech.RecognitionService"/></intent-filter><meta-data android:name="android.speech" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisAccess" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/jarvis_access"/></service><service android:name=".WakeService" android:foregroundServiceType="microphone" android:exported="false"/></application>#' $M
+          sed -i 's#<uses-permission android:name="android.permission.VIBRATE"/>#<uses-permission android:name="android.permission.VIBRATE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><uses-permission android:name="android.permission.ANSWER_PHONE_CALLS"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/><uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/><uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>#' $M
+          sed -i 's#</application>#<activity android:name=".OverlayActivity" android:theme="@style/OverlayTheme" android:launchMode="singleTask" android:excludeFromRecents="true" android:taskAffinity="" android:exported="false" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"/><service android:name=".JarvisInteractionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"><intent-filter><action android:name="android.service.voice.VoiceInteractionService"/></intent-filter><meta-data android:name="android.voice_interaction" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisSessionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"/><service android:name=".JarvisRecognizer" android:exported="true"><intent-filter><action android:name="android.speech.RecognitionService"/></intent-filter><meta-data android:name="android.speech" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisAccess" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/jarvis_access"/></service><service android:name=".JarvisNotif" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true"><intent-filter><action android:name="android.service.notification.NotificationListenerService"/></intent-filter></service><service android:name=".WakeService" android:foregroundServiceType="microphone" android:exported="false"/></application>#' $M
           S=android/app/src/main/res/values/styles.xml
           sed -i 's#</resources>#<style name="OverlayTheme" parent="Theme.AppCompat.NoActionBar"><item name="android:windowIsTranslucent">true</item><item name="android:windowBackground">@android:color/transparent</item><item name="android:backgroundDimEnabled">false</item><item name="android:windowAnimationStyle">@android:style/Animation.Translucent</item></style></resources>#' $S
           python3 - <<'PY'
