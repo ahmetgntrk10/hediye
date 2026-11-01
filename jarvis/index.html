@@ -129,7 +129,7 @@ function after(){speaking=false;lastAct=Date.now();setState('idle');if(S.always)
 async function say(text){
   const t=clean(text);if(!t){return}
   stopSpeech();stopRec();speaking=true;lastAct=Date.now();setState('speak');try{PL('JarvisView')&&PL('JarvisView').unmute()}catch(e){}
-  if(S.vo==='gemini'&&S.kG&&navigator.onLine!==false){try{const d=await gemSpeak(t.slice(0,600));if(!speaking)return;await playPCM(d);if(speaking)after();return}catch(e){log('s','Gemini sesi olmadı ('+e.message+'), telefon sesine geçtim.');if(!speaking)return}}
+  if(S.vo==='gemini'&&S.kG&&navigator.onLine!==false&&Date.now()>(window._gtOff||0)){try{const d=await gemSpeak(t.slice(0,600));if(!speaking)return;await playPCM(d);if(speaking)after();return}catch(e){if(/429/.test(e.message))window._gtOff=Date.now()+15*60000;log('s','Gemini sesi olmadı ('+e.message+'), telefon sesine geçtim.');if(!speaking)return}}
   if(NATIVE&&PL('JarvisView')){try{await PL('JarvisView').ttsSpeak({text:t});if(speaking)after();return}catch(e){log('s','Telefon sesi olmadı: '+(e&&e.message||e))}}
   if(!('speechSynthesis' in window)){after();return}
   return new Promise(res=>{const parts=t.match(/[^.!?\n]+[.!?]?/g)||[t];let i=0;let fin=false;
@@ -223,7 +223,7 @@ async function local(t){
 }
 /* ---------- LLM ---------- */
 const SYS='Sen JARVIS adlı, Iron Man filmindeki gibi zeki, sakin ve hafif esprili bir sesli asistansın. Kullanıcıyla Türkçe konuş (kullanıcı başka dilde yazarsa o dilde). Cevapların konuşulacağı için kısa ve doğal olsun: genelde 1-3 cümle. Madde işareti, emoji ve markdown kullanma. Bilmediğin şeyi uydurma. KURALLAR: Asla "istersen araştırayım", "ister misin", "bakayım mı", "yardımcı olabilirim" gibi teklif ya da soru cümlesi kurma; "bakayım" deme, bak ve sonucu söyle. Arama aracın var: güncel veya bilgi sorusunu kendin araştırıp doğrudan cevapla. Önceki konuşmayı dikkate al ("ne zaman başlayacak" gibi kısa sorular bir önceki konuyla ilgilidir). Cevap en fazla 2 cümle, gereksiz giriş ve kapanış yok. '+(NATIVE?'Telefonun sahibisin gibi onu kontrol edebilirsin: uygulama açma, uygulama içinde işlem yapma, mesaj, arama, ayarlar. "Yapamam" veya "erişemiyorum" deme; ilgili eylemi başlat. Haber ve güncel bilgi istenirse arama sonuçlarını kullan ve en önemli 3 başlığı kısaca söyle.':'Uygulama açmak, ekrana yansıtmak, telefonu kontrol etmek gibi eylemleri sen yapamazsın; yapmış gibi konuşma, yapamadığını söyle.')+' Kullanıcıya "efendim" demen gerekmez, samimi ol.';
-const ACT_SYS=NATIVE?' Telefonu kontrol edebilirsin. Kullanıcı bir eylem istediğinde (arama, mesaj, alarm, fener, ses, uygulama açma, navigasyon, ayarlar) kısa cevabının sonuna TEK satır ekle: [[EYLEM {"t":"call","name":"Ahmet"}]]. Türler: call(name), sms(name,text), wa(name,text), alarm(h,m), timer(sec), torch(on:true/false), volume(level 0-100), open(app), nav(q), settings(page: wifi|bluetooth|location|airplane|display|sound|battery). Türler ayrıca: agent(goal) — ekrandaki uygulamalarda birden çok adım gereken HER iş için (WhatsApp araması veya mesajı, Instagram, uygulama içi işlem, ayar değiştirme, formlar...) {"t":"agent","goal":"ayrıntılı görev"} kullan; telefonun tamamını sen kullanırsın. Eylemi yalnızca kullanıcı açıkça isterse ekle; sohbet cevabında ekleme.':'';
+const ACT_SYS=NATIVE?' Telefonu kontrol edebilirsin. Kullanıcı bir eylem istediğinde (arama, mesaj, alarm, fener, ses, uygulama açma, navigasyon, ayarlar) kısa cevabının sonuna eylem satırı ekle (birden çok kişi ya da iş varsa HER BİRİ için ayrı satır, sırayla): [[EYLEM {"t":"call","name":"Ahmet"}]]. Türler: call(name), sms(name,text), wa(name,text), alarm(h,m), timer(sec), torch(on:true/false), volume(level 0-100), open(app), nav(q), settings(page: wifi|bluetooth|location|airplane|display|sound|battery). Türler ayrıca: agent(goal) — ekrandaki uygulamalarda birden çok adım gereken HER iş için (WhatsApp araması veya mesajı, Instagram, uygulama içi işlem, ayar değiştirme, formlar...) {"t":"agent","goal":"ayrıntılı görev"} kullan; telefonun tamamını sen kullanırsın. Eylemi yalnızca kullanıcı açıkça isterse ekle; sohbet cevabında ekleme.':'';
 let models={};
 function tfetch(u,o,ms){const c=new AbortController(),h=setTimeout(()=>c.abort(),ms||25000);return fetch(u,{...o,signal:c.signal}).catch(e=>{throw new Error(e.name==='AbortError'?'zaman aşımı':e.message)}).finally(()=>clearTimeout(h))}
 let rawG=null;async function gAll(){if(rawG)return rawG;const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200',{headers:{'x-goog-api-key':S.kG}},15000);if(!r.ok)throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,120));rawG=(await r.json()).models||[];return rawG}
@@ -250,7 +250,7 @@ async function viaDeep(text,h){const list=await dList();let err;h=cleanHist(h);c
   for(const m of list.slice(0,2)){try{const r=await tfetch('https://api.deepseek.com/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+S.kD,'content-type':'application/json'},body:JSON.stringify({model:m,messages:msgs})},45000);if(!r.ok)throw new Error('DeepSeek '+r.status+': '+(await r.text()).slice(0,140));const j=await r.json();const t=(j.choices?.[0]?.message?.content||'').trim();if(!t)throw new Error('boş cevap');return{text:t,engine:'DeepSeek',model:m}}catch(e){err=e}}throw err}
 async function ask(text,h,img,web){
   const order=S.eng==='gemini'?['g']:S.eng==='deepseek'?['d']:['g','d'];let last=null,tried=0;
-  for(const o of order){if(o==='g'&&!S.kG||o==='d'&&!S.kD)continue;tried++;try{return o==='g'?await viaGemini(text,h,img,web):await viaDeep(text,h)}catch(e){last=e;if(o==='g')models.g=null;else models.d=null}}
+  for(const o of order){if(o==='g'&&!S.kG||o==='d'&&!S.kD)continue;if(o==='g'&&S.kD&&order.length>1&&Date.now()<(window._gOff||0))continue;tried++;try{return o==='g'?await viaGemini(text,h,img,web):await viaDeep(text,h)}catch(e){last=e;if(/429/.test(e.message))window._gOff=Date.now()+60000;if(o==='g')models.g=null;else models.d=null}}
   if(!tried)throw new Error('Anahtar girilmemiş. Sağ üstten "ayar"a dokun.');throw last||new Error('cevap alınamadı');
 }
 /* ---------- sunucu (Jarvis beyni) ---------- */
@@ -260,7 +260,7 @@ const TASKRX=/(arka planda|ben yokken|ben dönene kadar|görev (ver|ekle|olarak)
 const YESRX=/^(evet|tamam|onay(la)?|gönder|yolla|olur|aynen|doğru|yap|hayır|hayir|vazgeç|iptal|gönderme|yapma|olmaz|dur)\b/i;
 let srvPend=false,srvSeen={};
 const srvOn=()=>!!(S.sU&&S.sT);
-function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 21:10 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
+function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 21:40 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
 async function srvCall(path,body,get){const url=S.sU.replace(/\/+$/,'')+path,headers={'Authorization':'Bearer '+S.sT,'Content-Type':'application/json'};const H=NATIVE&&PL('CapacitorHttp');
   if(H){const r=await(get?H.get({url,headers,connectTimeout:15000,readTimeout:70000}):H.post({url,headers,data:body,connectTimeout:15000,readTimeout:70000}));if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(r.status>=400)throw new Error('sunucu '+r.status);return typeof r.data==='string'?JSON.parse(r.data):r.data}
   const r=await tfetch(url,{method:get?'GET':'POST',headers,body:get?undefined:JSON.stringify(body)},70000);if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(!r.ok)throw new Error('sunucu '+r.status);return r.json()}
@@ -309,8 +309,8 @@ async function run(text){
     let img=null;if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&camOn)img=grab();
     if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&!img)throw new Error('Kamera kapalı.');
     const a=await ask(text,hist.slice(-12),img,WEBQ.test(text));
-    let txt=a.text,act=null;const am=txt.match(/\[\[EYLEM\s*(\{[\s\S]*?\})\s*\]\]/);if(am){txt=txt.replace(am[0],'').trim();try{act=JSON.parse(am[1])}catch(e){}}
-    if(act&&NATIVE){const rs=await execAct(act);if(rs)txt=(txt?txt+' ':'')+rs}
+    let txt=a.text;const acts=[];for(const am of [...txt.matchAll(/\[\[EYLEM\s*(\{[\s\S]*?\})\s*\]\]/g)]){txt=txt.replace(am[0],'').trim();try{acts.push(JSON.parse(am[1]))}catch(e){}}
+    if(acts.length&&NATIVE){for(const act of acts){const rs=await execAct(act);if(rs)txt=(txt?txt+' ':'')+rs}}
     hist.push({r:'u',t:text},{r:'a',t:txt});log('j',txt);log('s',a.engine+' · '+a.model);busy=false;await say(txt);
   }catch(e){clearInterval(iv);busy=false;setState('idle');log('s','Hata: '+e.message);msg(e.message,6000);if(/CORS|Failed to fetch|NetworkError/i.test(e.message))log('s','Bağlantı engellendi (tarayıcı izin vermiyor olabilir).');if(S.always)setTimeout(listenOnce,600)}
   clearInterval(iv);busy=false;
@@ -523,9 +523,10 @@ const fm=(h,m)=>String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function accOn(){try{const r=await PL('JarvisView').accState();return!!(r&&r.on)}catch(e){return false}}
 async function scr(){try{const r=await PL('JarvisView').screen();return JSON.parse(r.nodes||'{"pkg":"","n":[]}')}catch(e){return{pkg:'',n:[]}}}
+function jx(x){x=String(x||'');const a=x.indexOf('{'),b=x.lastIndexOf('}');return a>=0&&b>a?x.slice(a,b+1):x}
 async function llmJson(sys,user){let err;
-  if(S.kG){try{const m=(await gList())[0];const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/'+m+':generateContent',{method:'POST',headers:{'x-goog-api-key':S.kG,'content-type':'application/json'},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:user}]}],generationConfig:{responseMimeType:'application/json',thinkingConfig:{thinkingBudget:0}}})},12000);if(!r.ok)throw new Error('Gemini '+r.status);const j=await r.json();const x=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();if(x)return x}catch(e){err=e}}
-  if(S.kD){const m=(await dList())[0];const r=await tfetch('https://api.deepseek.com/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+S.kD,'content-type':'application/json'},body:JSON.stringify({model:m,response_format:{type:'json_object'},messages:[{role:'system',content:sys},{role:'user',content:user}]})},20000);if(!r.ok)throw new Error('DeepSeek '+r.status);const j=await r.json();return(j.choices?.[0]?.message?.content||'').trim()}
+  if(S.kD){try{const m=(await dList())[0];const r=await tfetch('https://api.deepseek.com/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+S.kD,'content-type':'application/json'},body:JSON.stringify({model:m,response_format:{type:'json_object'},messages:[{role:'system',content:sys+' Cevabın yalnızca JSON olsun.'},{role:'user',content:user}]})},20000);if(!r.ok)throw new Error('DeepSeek '+r.status);const j=await r.json();const x=(j.choices?.[0]?.message?.content||'').trim();if(x)return jx(x)}catch(e){err=e}}
+  if(S.kG){for(const m of (await gList()).slice(0,3)){try{const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/'+m+':generateContent',{method:'POST',headers:{'x-goog-api-key':S.kG,'content-type':'application/json'},body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:user}]}],generationConfig:{responseMimeType:'application/json',thinkingConfig:{thinkingBudget:0}}})},12000);if(!r.ok)throw new Error('Gemini '+r.status);const j=await r.json();const x=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();if(x)return jx(x)}catch(e){err=e}}}
   throw err||new Error('anahtar yok')}
 const AG_SYS='Bir Android telefonu erişilebilirlik ile adım adım kullanıyorsun. Her adımda SADECE tek bir JSON döndür: {"a":"click|type|scroll|back|home|open|wait|done|fail","text":"","idx":-1,"dir":"down","say":"kısa Türkçe açıklama"}. Ekran listesi satırları: idx|T(tıklanabilir)E(yazılabilir)|metin. click için listedeki idx kullan (yoksa text ver). type için text yaz (idx yazılabilir kutu). open için uygulama adını text olarak ver. Hedef bittiğinde done, olmayacaksa fail ver ve say alanına sonucu yaz. Aynı adımı tekrar tekrar deneme. WhatsApp mesajı yazınca Gönder/Send düğmesine tıkla. WhatsApp aramada sohbeti açıp Sesli arama/Voice call düğmesine tıkla. 112 gibi acil numaraları ARAMA. Para gönderme, satın alma, silme, hesap veya şifre değiştirme gibi geri alınamaz işlemleri YAPMA; fail ver ve nedenini söyle.';
 let agentOn=false;
@@ -538,7 +539,7 @@ async function agent(goal,del){
   const hist=[];let res='';
   try{for(let i=0;i<16;i++){
     const sc=await scr();const lines=(sc.n||[]).map(n=>n.i+'|'+(n.c?'T':'')+(n.e?'E':'')+'|'+n.t).join('\n');
-    let raw,a;try{raw=await llmJson(del?AG_DEL:AG_SYS,'GÖREV: '+goal+'\nÖNCEKİ ADIMLAR: '+(hist.join(' ; ')||'yok')+'\nAÇIK UYGULAMA: '+(sc.pkg||'bilinmiyor')+'\nEKRAN:\n'+lines);a=JSON.parse(raw.replace(/^```json|```$/g,''))}catch(e){res='Beynime ulaşamadım: '+String(e&&e.message||e).slice(0,60);break}
+    let raw,a;try{raw=await llmJson(del?AG_DEL:AG_SYS,'GÖREV: '+goal+'\nÖNCEKİ ADIMLAR: '+(hist.join(' ; ')||'yok')+'\nAÇIK UYGULAMA: '+(sc.pkg||'bilinmiyor')+'\nEKRAN:\n'+lines);a=JSON.parse(jx(raw))}catch(e){res='Beynime ulaşamadım: '+String(e&&e.message||e).slice(0,60);break}
     lastAct=Date.now();log('s','▸ '+(a.say||a.a));
     if(a.a==='done'){res=a.say||'Tamam, yaptım.';break}
     if(a.a==='fail'){res=a.say||'Yapamadım.';break}
