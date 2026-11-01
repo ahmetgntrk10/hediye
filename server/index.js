@@ -11,6 +11,8 @@ const ACCOUNTS = (ENV.EMAIL_ACCOUNTS || '').split(',').map(s => s.trim()).filter
 const N8N_URL = ENV.N8N_WEBHOOK_URL || '';
 const N8N_SECRET = ENV.N8N_SECRET || '';
 const GBASE = ENV.GEMINI_BASE || 'https://generativelanguage.googleapis.com/v1beta';
+const DBASE = ENV.DEEPSEEK_BASE || 'https://api.deepseek.com';
+const DEEP_MODEL = ENV.DEEPSEEK_MODEL || 'deepseek-chat';
 
 const pool = globalThis.__POOL || new pg.Pool({ connectionString: ENV.DATABASE_URL });
 const q = (sql, p) => pool.query(sql, p);
@@ -112,7 +114,7 @@ async function geminiLoop(text, history, ctx) {
     contents.push({ role: 'model', parts });
     const resp = [];
     for (const c of calls) {
-      let out; try { out = await runTool(c.functionCall.name, c.functionCall.args, ctx); } catch (e) { out = { hata: String(e.message || e) }; }
+      let out; try { ctx.used = true; out = await runTool(c.functionCall.name, c.functionCall.args, ctx); } catch (e) { out = { hata: String(e.message || e) }; }
       resp.push({ functionResponse: { name: c.functionCall.name, response: out } });
     }
     contents.push({ role: 'user', parts: resp });
@@ -120,10 +122,29 @@ async function geminiLoop(text, history, ctx) {
   return 'İşi bitiremedim, çok adım gerekti.';
 }
 
+const lowerTypes = o => Array.isArray(o) ? o.map(lowerTypes) : (o && typeof o === 'object') ? Object.fromEntries(Object.entries(o).map(([k, v]) => [k, k === 'type' && typeof v === 'string' ? v.toLowerCase() : lowerTypes(v)])) : o;
+async function deepLoop(text, history, ctx) {
+  const tools = TOOLS.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: lowerTypes(t.parameters) } }));
+  const msgs = [{ role: 'system', content: SYS + (ctx.mem ? '\nHafıza:\n' + ctx.mem : '') }, ...history.filter(h => h && h.t).map(h => ({ role: h.r === 'u' ? 'user' : 'assistant', content: h.t })), { role: 'user', content: text }];
+  for (let step = 0; step < 6; step++) {
+    const r = await fetch(`${DBASE}/chat/completions`, { method: 'POST', headers: { Authorization: 'Bearer ' + DEEP_KEY, 'content-type': 'application/json' }, body: JSON.stringify({ model: DEEP_MODEL, messages: msgs, tools }) });
+    if (!r.ok) throw new Error('DeepSeek ' + r.status + ' ' + (await r.text()).slice(0, 120));
+    const m = (await r.json()).choices?.[0]?.message;
+    if (!m) throw new Error('DeepSeek boş cevap');
+    if (!m.tool_calls || !m.tool_calls.length) return (m.content || '').trim() || 'Bir şey diyemedim.';
+    msgs.push({ role: 'assistant', content: m.content || '', tool_calls: m.tool_calls });
+    for (const c of m.tool_calls) {
+      let out; try { ctx.used = true; out = await runTool(c.function.name, JSON.parse(c.function.arguments || '{}'), ctx); } catch (e) { out = { hata: String(e.message || e) }; }
+      msgs.push({ role: 'tool', tool_call_id: c.id, content: JSON.stringify(out) });
+    }
+  }
+  return 'İşi bitiremedim, çok adım gerekti.';
+}
+
 async function deepFallback(text, history) {
   if (!DEEP_KEY) throw new Error('DeepSeek anahtarı yok');
   const msgs = [{ role: 'system', content: SYS + '\n(Şu an araçlar kapalı, sadece sohbet edebilirsin.)' }, ...history.map(h => ({ role: h.r === 'u' ? 'user' : 'assistant', content: h.t })), { role: 'user', content: text }];
-  const r = await fetch('https://api.deepseek.com/chat/completions', { method: 'POST', headers: { Authorization: 'Bearer ' + DEEP_KEY, 'content-type': 'application/json' }, body: JSON.stringify({ model: 'deepseek-chat', messages: msgs }) });
+  const r = await fetch(`${DBASE}/chat/completions`, { method: 'POST', headers: { Authorization: 'Bearer ' + DEEP_KEY, 'content-type': 'application/json' }, body: JSON.stringify({ model: DEEP_MODEL, messages: msgs }) });
   if (!r.ok) throw new Error('DeepSeek ' + r.status);
   return ((await r.json()).choices?.[0]?.message?.content || '').trim();
 }
@@ -131,9 +152,11 @@ async function deepFallback(text, history) {
 async function think(text, history, opts = {}) {
   const ctx = { approvals: [], actions: [], taskId: opts.taskId, mem: '' };
   try { const m = await q('select text from memories order by id desc limit 15'); ctx.mem = m.rows.map(x => '- ' + x.text).join('\n'); } catch (e) {}
-  let reply;
-  try { if (!GEMINI_KEY) throw new Error('Gemini anahtarı yok'); reply = await geminiLoop(text, history, ctx); }
-  catch (e) { try { reply = await deepFallback(text, history); } catch (e2) { reply = 'Beynime ulaşamadım: ' + String(e.message).slice(0, 80); } }
+  let reply, err = '';
+  if (DEEP_KEY) { try { reply = await deepLoop(text, history, ctx); } catch (e) { err = String(e.message || e); } }
+  if (reply === undefined && !ctx.used && GEMINI_KEY) { try { reply = await geminiLoop(text, history, ctx); } catch (e) { err += ' | ' + String(e.message || e); } }
+  if (reply === undefined && !ctx.used && DEEP_KEY) { try { reply = await deepFallback(text, history); } catch (e) { err += ' | ' + String(e.message || e); } }
+  if (reply === undefined) reply = 'Beynime ulaşamadım: ' + err.slice(0, 120);
   return { reply, approvals: ctx.approvals, actions: ctx.actions };
 }
 
