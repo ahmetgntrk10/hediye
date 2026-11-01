@@ -159,7 +159,7 @@ async function deepFallback(text, history) {
 async function think(text, history, opts = {}) {
   const ctx = { approvals: [], actions: [], taskId: opts.taskId, mem: '' };
   try { const m = await q('select text from memories order by id desc limit 15'); ctx.mem = m.rows.map(x => '- ' + x.text).join('\n'); } catch (e) {}
-  try { const c = await q('select role,text,created_at from chat_log order by id desc limit 14'); ctx.mem += (ctx.mem ? '\n' : '') + 'SON OLAYLAR (yeniden eskiye):\n' + c.rows.map(fmtLog).join('\n'); } catch (e) {}
+  try { const c = await q('select role,text,created_at from chat_log order by id desc limit 30'); ctx.mem += (ctx.mem ? '\n' : '') + 'SON OLAYLAR (yeniden eskiye):\n' + c.rows.map(fmtLog).join('\n'); } catch (e) {}
   let reply, err = '';
   if (DEEP_KEY) { try { reply = await deepLoop(text, history, ctx); } catch (e) { err = String(e.message || e); } }
   if (reply === undefined && !ctx.used && GEMINI_KEY) { try { reply = await geminiLoop(text, history, ctx); } catch (e) { err += ' | ' + String(e.message || e); } }
@@ -190,7 +190,7 @@ const auth = (req, res, next) => {
   if (h === 'Bearer ' + TOKEN) return next();
   res.status(401).json({ error: 'yetkisiz' });
 };
-app.get('/health', (req, res) => res.json({ ok: true, gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length }));
+app.get('/health', (req, res) => res.json({ ok: true, ver: 'g2', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length }));
 
 app.post('/chat', auth, async (req, res) => {
   try {
