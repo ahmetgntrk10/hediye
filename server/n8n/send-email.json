@@ -1,0 +1,148 @@
+{
+ "name": "Jarvis e-posta gonder",
+ "nodes": [
+  {
+   "parameters": {
+    "httpMethod": "POST",
+    "path": "jarvis-send-email",
+    "authentication": "headerAuth",
+    "responseMode": "lastNode",
+    "options": {}
+   },
+   "name": "Webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
+   "position": [
+    0,
+    200
+   ],
+   "webhookId": "jarvis-send-email"
+  },
+  {
+   "parameters": {
+    "rules": {
+     "values": [
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": false,
+         "leftValue": "",
+         "typeValidation": "loose"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.body.account }}",
+          "rightValue": "ahmetgunturk99@gmail.com",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "ahmetgunturk99@gmail.com"
+      },
+      {
+       "conditions": {
+        "options": {
+         "caseSensitive": false,
+         "leftValue": "",
+         "typeValidation": "loose"
+        },
+        "conditions": [
+         {
+          "leftValue": "={{ $json.body.account }}",
+          "rightValue": "ahmetgunturk10@gmail.com",
+          "operator": {
+           "type": "string",
+           "operation": "equals"
+          }
+         }
+        ],
+        "combinator": "and"
+       },
+       "renameOutput": true,
+       "outputKey": "ahmetgunturk10@gmail.com"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "name": "Hesap sec",
+   "type": "n8n-nodes-base.switch",
+   "typeVersion": 3.2,
+   "position": [
+    260,
+    200
+   ]
+  },
+  {
+   "parameters": {
+    "fromEmail": "ahmetgunturk99@gmail.com",
+    "toEmail": "={{ $('Webhook').item.json.body.to }}",
+    "subject": "={{ $('Webhook').item.json.body.subject }}",
+    "emailFormat": "text",
+    "text": "={{ $('Webhook').item.json.body.body }}",
+    "options": {}
+   },
+   "name": "Gonder ahmetgunturk99@gmail.com",
+   "type": "n8n-nodes-base.emailSend",
+   "typeVersion": 2.1,
+   "position": [
+    540,
+    100
+   ]
+  },
+  {
+   "parameters": {
+    "fromEmail": "ahmetgunturk10@gmail.com",
+    "toEmail": "={{ $('Webhook').item.json.body.to }}",
+    "subject": "={{ $('Webhook').item.json.body.subject }}",
+    "emailFormat": "text",
+    "text": "={{ $('Webhook').item.json.body.body }}",
+    "options": {}
+   },
+   "name": "Gonder ahmetgunturk10@gmail.com",
+   "type": "n8n-nodes-base.emailSend",
+   "typeVersion": 2.1,
+   "position": [
+    540,
+    300
+   ]
+  }
+ ],
+ "connections": {
+  "Webhook": {
+   "main": [
+    [
+     {
+      "node": "Hesap sec",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Hesap sec": {
+   "main": [
+    [
+     {
+      "node": "Gonder ahmetgunturk99@gmail.com",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Gonder ahmetgunturk10@gmail.com",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {}
+}
