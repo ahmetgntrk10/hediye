@@ -265,13 +265,19 @@ const TASKRX=/(arka planda|ben yokken|ben dönene kadar|görev (ver|ekle|olarak)
 const YESRX=/^(evet|tamam|onay(la)?|gönder|yolla|olur|aynen|doğru|yap|hayır|hayir|vazgeç|iptal|gönderme|yapma|olmaz|dur)\b/i;
 let srvPend=false,srvSeen={};
 const srvOn=()=>!!(S.sU&&S.sT);
-function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 23:50 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
+function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.12 00:10 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
 async function srvCall(path,body,get){const url=S.sU.replace(/\/+$/,'')+path,headers={'Authorization':'Bearer '+S.sT,'Content-Type':'application/json'};const H=NATIVE&&PL('CapacitorHttp');
   if(H){const r=await(get?H.get({url,headers,connectTimeout:15000,readTimeout:70000}):H.post({url,headers,data:body,connectTimeout:15000,readTimeout:70000}));if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(r.status>=400)throw new Error('sunucu '+r.status);return typeof r.data==='string'?JSON.parse(r.data):r.data}
   const r=await tfetch(url,{method:get?'GET':'POST',headers,body:get?undefined:JSON.stringify(body)},70000);if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(!r.ok)throw new Error('sunucu '+r.status);return r.json()}
+let actsRunning=false;const QUIET=new Set(['alarm','timer','torch','volume']);
+async function runActs(list){const acts=[...list.filter(a=>QUIET.has(a.t)),...list.filter(a=>!QUIET.has(a.t))];actsRunning=true;let out='';
+  try{store.set('rest',acts);while(acts.length){const a=acts.shift();store.set('rest',acts);let rs='';try{rs=await execAct(a)}catch(e){rs='Yapamadım: '+String(e&&e.message||e).slice(0,100)}if(rs)out+=(out?' ':'')+rs}}
+  finally{store.set('rest',[]);actsRunning=false}return out}
+async function resumeActs(){if(actsRunning)return;const r=store.get('rest',[]);if(!r||!r.length)return;log('s','Yarım kalan '+r.length+' iş devam ediyor.');const rs=await runActs(r);if(rs){log('j',rs);if(!MINI&&!busy)say(rs)}}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(resumeActs,1200)});
 function queueTask(t){const q=store.get('queue',[]);q.push(t);store.set('queue',q);srvStat()}
 async function syncQueue(){const q=store.get('queue',[]);if(!q.length||!srvOn()||navigator.onLine===false)return;try{await srvCall('/tasks',{tasks:q});store.set('queue',[]);srvStat();log('s',q.length+' bekleyen görev sunucuya gönderildi, başlıyor.');return q.length}catch(e){log('s','Görevler gönderilemedi: '+e.message)}}
-async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);let r=o.reply||'';if(o.ms)log('s','sunucu '+(o.ms/1000).toFixed(1)+'s');if(NATIVE&&o.actions&&o.actions.length){for(const a of o.actions){const rs=await execAct(a);if(rs&&(!r||/^Yapamadım|yok|izin/i.test(rs)))r+=(r?' ':'')+rs}}return r||'Tamam.'}
+async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);let r=o.reply||'';if(o.ms)log('s','sunucu '+(o.ms/1000).toFixed(1)+'s');if(NATIVE&&o.actions&&o.actions.length){const rs=await runActs(o.actions);if(rs&&(!r||/Yapamadım|yok|izin|Hangisi|Birden fazla/i.test(rs)))r+=(r?' ':'')+rs}return r||'Tamam.'}
 async function srvRoute(text){
   if(!srvOn())return MAILW.test(text)?'Mail göndermek için sunucu bağlı olmalı. Ayarlardan sunucu şifresini gir.':null;
   const isTask=TASKRX.test(text),isSrv=MAILW.test(text)||(SRVRX.test(text)&&!/(aç|açsana|açar mısın|başlat)\s*$/.test(text.trim()))||(srvPend&&YESRX.test(text.trim()));
@@ -284,7 +290,7 @@ async function srvRoute(text){
 }
 async function srvPoll(){if(!srvOn()||navigator.onLine===false)return;try{await syncQueue();const a=await srvCall('/approvals',null,true);const fresh=(a||[]).filter(x=>!srvSeen[x.id]);if(fresh.length){fresh.forEach(x=>srvSeen[x.id]=1);srvPend=true;const m='Onayını bekleyen iş var: '+fresh[0].summary+'. Yapayım mı? Evet ya da hayır de.';log('j',m);if(!MINI&&!busy)say(m)}
   const ts=await srvCall('/tasks',null,true);const dn=(ts||[]).filter(x=>x.status==='done'||x.status==='failed');const seen=store.get('tseen',null);if(seen===null){store.set('tseen',dn.map(x=>x.id))}else{const fr=dn.filter(x=>!seen.includes(x.id));if(fr.length){store.set('tseen',seen.concat(fr.map(x=>x.id)).slice(-200));const m='Arka plandaki işin bitti: '+String(fr[0].result||fr[0].text).slice(0,300);log('j',m);if(!MINI&&!busy)say(m)}}}catch(e){}}
-function srvBoot(){srvStat();window.addEventListener('online',()=>{setTimeout(srvPoll,1500)});setTimeout(srvPoll,4000);setInterval(srvPoll,120000)}
+function srvBoot(){srvStat();setTimeout(resumeActs,3000);window.addEventListener('online',()=>{setTimeout(srvPoll,1500)});setTimeout(srvPoll,4000);setInterval(srvPoll,120000)}
 $('bDx').onclick=async()=>{const o=$('dx');const out=[];const P=()=>{o.textContent=out.join('\n')};
   const T=async(n,f)=>{out.push('… '+n);P();const i=out.length-1,t0=Date.now();try{const r=await f();out[i]='✓ '+n+' ('+Math.round((Date.now()-t0)/100)/10+'s) '+(r||'')}catch(e){out[i]='✗ '+n+': '+String(e&&e.message||e).slice(0,300)}P()};
   S.sU=$('sU').value.trim();S.sT=$('sT').value.trim();S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();
@@ -315,7 +321,7 @@ async function run(text){
     if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&!img)throw new Error('Kamera kapalı.');
     const a=await ask(text,hist.slice(-12),img,WEBQ.test(text));
     let txt=a.text;const acts=[];for(const am of [...txt.matchAll(/\[\[EYLEM\s*(\{[\s\S]*?\})\s*\]\]/g)]){txt=txt.replace(am[0],'').trim();try{acts.push(JSON.parse(am[1]))}catch(e){}}
-    if(acts.length&&NATIVE){for(const act of acts){const rs=await execAct(act);if(rs)txt=(txt?txt+' ':'')+rs}}
+    if(acts.length&&NATIVE){const rs=await runActs(acts);if(rs)txt=(txt?txt+' ':'')+rs}
     hist.push({r:'u',t:text},{r:'a',t:txt});log('j',txt);log('s',a.engine+' · '+a.model);busy=false;await say(txt);
   }catch(e){clearInterval(iv);busy=false;setState('idle');log('s','Hata: '+e.message);msg(e.message,6000);if(/CORS|Failed to fetch|NetworkError/i.test(e.message))log('s','Bağlantı engellendi (tarayıcı izin vermiyor olabilir).');if(S.always)setTimeout(listenOnce,600)}
   clearInterval(iv);busy=false;
