@@ -584,6 +584,13 @@ jobs:
               call.resolve(r);
             }
             @PluginMethod
+            public void notifReply(PluginCall call) {
+              if (JarvisNotif.inst == null) { call.reject("bildirim erisimi kapali"); return; }
+              JSObject o = new JSObject();
+              o.put("r", JarvisNotif.inst.reply(call.getString("name", ""), call.getString("text", "")));
+              call.resolve(o);
+            }
+            @PluginMethod
             public void callAnswer(PluginCall call) {
               try {
                 if (androidx.core.content.ContextCompat.checkSelfPermission(getContext(), "android.permission.ANSWER_PHONE_CALLS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -1243,6 +1250,30 @@ jobs:
             }
             private String esc(String s) {
               return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ").replace("\t", " ");
+            }
+            String reply(String name, String text) {
+              try {
+                Locale tr = new Locale("tr", "TR");
+                String q = name.toLowerCase(tr);
+                StatusBarNotification[] arr = getActiveNotifications();
+                for (StatusBarNotification sbn : arr) {
+                  Notification n = sbn.getNotification();
+                  if (n == null || n.actions == null) continue;
+                  CharSequence t = n.extras.getCharSequence(Notification.EXTRA_TITLE);
+                  if (t == null || !t.toString().toLowerCase(tr).contains(q)) continue;
+                  for (Notification.Action ac : n.actions) {
+                    android.app.RemoteInput[] ri = ac.getRemoteInputs();
+                    if (ri == null || ri.length == 0) continue;
+                    android.content.Intent it = new android.content.Intent();
+                    Bundle b = new Bundle();
+                    for (android.app.RemoteInput r : ri) b.putCharSequence(r.getResultKey(), text);
+                    android.app.RemoteInput.addResultsToIntent(ri, it, b);
+                    ac.actionIntent.send(this, 0, it);
+                    return "ok";
+                  }
+                }
+              } catch (Exception e) { return "hata: " + e.getMessage(); }
+              return "yok";
             }
             String listJson() {
               StringBuilder sb = new StringBuilder("[");

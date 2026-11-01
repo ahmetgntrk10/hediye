@@ -140,9 +140,11 @@ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;let rec=null,r
 function stopRec(){if(NATIVE&&recOn&&PL('SpeechRecognition')){try{PL('SpeechRecognition').stop()}catch(e){}}if(rec){try{rec.onend=null;rec.abort()}catch(e){}}rec=null;recOn=false}
 let muteHook=false;function muteBeep(ms){try{const J=PL('JarvisView');J&&J.mute({ms:ms||1100})}catch(e){}}
 let emptyN=0;
+function incomplete(t){const l=t.toLowerCase().trim();if(/[,…]$|\.\.\.$/.test(l))return true;const w=l.split(/\s+/);if(w.length<=1&&!/^(dur|sus|evet|hayır|tamam|iptal|kapat|durdur|geç|sonraki|önceki|devam|vazgeç|aç)$/.test(l))return true;return /(^|\s)(ve|ama|çünkü|yani|şey|e+|ee+|ıı+|hmm+|sonra|ki|diye|için|ile|bir|bu|şu|şunu|bunu|da|de|ya|veya|ben|bana|benim|kendime|gibi|falan|işte|mesela|bide|bi|hani|şöyle|ayrıca|önce|ardından|şuna|buna|ona|onu)$/.test(l)}
 async function listenNative(){const SN=PL('SpeechRecognition');if(recOn||speaking||enrolling)return;recOn=true;setState('listen');let t='';
   if(!muteHook){muteHook=true;try{SN.addListener('listeningState',e=>{if(e&&e.status==='stopped')muteBeep(1200)})}catch(e){}}muteBeep(1200);
   try{const r=await SN.start({language:'tr-TR',maxResults:1,partialResults:false,popup:false});t=((r&&r.matches&&r.matches[0])||'').trim()}catch(e){if(/permission|izin/i.test(String(e&&e.message||e))){msg('Mikrofon izni verilmedi.');conv=false;setConv()}}
+  let more=0;while(t&&incomplete(t)&&more<2&&!enrolling){more++;let t2='';try{muteBeep(1200);const to=setTimeout(()=>{try{SN.stop()}catch(e){}},2600);const r2=await SN.start({language:'tr-TR',maxResults:1,partialResults:false,popup:false});clearTimeout(to);t2=((r2&&r2.matches&&r2.matches[0])||'').trim()}catch(e){}if(!t2)break;t+=' '+t2}
   recOn=false;if(enrolling)return;if(t){emptyN=0;handleSpeech(t)}else{setState('idle');if(MINI&&++emptyN>=2){closePanel();return}if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}}
 let enrolling=false;
 function listenOnce(){
@@ -232,8 +234,9 @@ async function gList(){if(models.g)return models.g;if(S.fast){let fm='';try{fm=s
   models.g=c.sort((a,b)=>sc(b)-sc(a)).map(m=>m.name);if(!models.g.length)throw new Error('Gemini modeli bulunamadı');return models.g}
 async function dList(){if(models.d)return models.d;const r=await tfetch('https://api.deepseek.com/models',{headers:{Authorization:'Bearer '+S.kD}});if(!r.ok)throw new Error('DeepSeek '+r.status);const j=await r.json();const ids=(j.data||[]).map(m=>m.id);
   const pref=S.fast?['chat','v3','reasoner']:['reasoner','chat'];models.d=ids.sort((a,b)=>{const f=x=>{const i=pref.findIndex(p=>x.includes(p));return i<0?9:i};return f(a)-f(b)});if(!models.d.length)throw new Error('DeepSeek modeli bulunamadı');return models.d}
+function cleanHist(h){h=(h||[]).filter(x=>x&&x.t&&String(x.t).trim());while(h.length&&h[0].r!=='u')h.shift();return h}
 async function viaGemini(text,h,img,web){const list=await gList();let err;const T0=Date.now(),LIM=S.fast?28000:60000;
-  const contents=h.map(x=>({role:x.r==='u'?'user':'model',parts:[{text:x.t}]}));const parts=[{text}];if(img)parts.unshift({inlineData:{mimeType:'image/jpeg',data:img}});contents.push({role:'user',parts});
+  h=cleanHist(h);const contents=h.map(x=>({role:x.r==='u'?'user':'model',parts:[{text:x.t}]}));const parts=[{text}];if(img)parts.unshift({inlineData:{mimeType:'image/jpeg',data:img}});contents.push({role:'user',parts});
   for(const m of list.slice(0,S.fast?2:4)){
     const variants=[];const pro=/pro/.test(m);
     const base={systemInstruction:{parts:[{text:SYS+ACT_SYS}]},contents},nt={generationConfig:{thinkingConfig:{thinkingBudget:0}}};
@@ -243,7 +246,7 @@ async function viaGemini(text,h,img,web){const list=await gList();let err;const 
     for(const body of variants){const left=LIM-(Date.now()-T0);if(left<2500){throw err||new Error('zaman aşımı')}try{log('s','deniyorum: '+m.replace('models/','')+(body.tools?' + web':''));const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/'+m+':generateContent',{method:'POST',headers:{'x-goog-api-key':S.kG,'content-type':'application/json'},body:JSON.stringify(body)},Math.min(S.fast?8000:30000,left));if(!r.ok)throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,140));const j=await r.json();const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();if(!t)throw new Error('boş cevap');try{store.set('gm',m)}catch(e){}return{text:t,engine:'Gemini'+(body.tools?' + web':''),model:m.replace('models/','')}}catch(e){err=e;log('s','  → '+e.message.slice(0,90));if(!/ 400/.test(e.message))break}}
     if(/ 40[13]/.test(err.message)&&!/quota|limit|exhaust/i.test(err.message))break}
   throw err}
-async function viaDeep(text,h){const list=await dList();let err;const msgs=[{role:'system',content:SYS+ACT_SYS},...h.map(x=>({role:x.r==='u'?'user':'assistant',content:x.t})),{role:'user',content:text}];
+async function viaDeep(text,h){const list=await dList();let err;h=cleanHist(h);const msgs=[{role:'system',content:SYS+ACT_SYS},...h.map(x=>({role:x.r==='u'?'user':'assistant',content:x.t})),{role:'user',content:text}];
   for(const m of list.slice(0,2)){try{const r=await tfetch('https://api.deepseek.com/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+S.kD,'content-type':'application/json'},body:JSON.stringify({model:m,messages:msgs})},45000);if(!r.ok)throw new Error('DeepSeek '+r.status+': '+(await r.text()).slice(0,140));const j=await r.json();const t=(j.choices?.[0]?.message?.content||'').trim();if(!t)throw new Error('boş cevap');return{text:t,engine:'DeepSeek',model:m}}catch(e){err=e}}throw err}
 async function ask(text,h,img,web){
   const order=S.eng==='gemini'?['g']:S.eng==='deepseek'?['d']:['g','d'];let last=null,tried=0;
@@ -251,12 +254,13 @@ async function ask(text,h,img,web){
   if(!tried)throw new Error('Anahtar girilmemiş. Sağ üstten "ayar"a dokun.');throw last||new Error('cevap alınamadı');
 }
 /* ---------- sunucu (Jarvis beyni) ---------- */
-const SRVRX=/(e-?posta|e-?mail|\bmail\b|gmail|hatırla\b|hatırlıyor musun|aklında tut|unutma|hafızana|hafızanda)/i;
+const MAILW=/((e-?posta|e-?mail|mail)\w*.*(yaz|gönder|\bat\b|yolla|cevapla)|(yaz|gönder|yolla)\w*.*(e-?posta|e-?mail|mail))/i;
+const SRVRX=/(e-?posta|e-?mail|mail|gmail|hatırla\b|hatırlıyor musun|aklında tut|unutma|hafızana|hafızanda)/i;
 const TASKRX=/(arka planda|ben yokken|ben dönene kadar|görev (ver|ekle|olarak)|sonra yap|internet gelince)/i;
 const YESRX=/^(evet|tamam|onay(la)?|gönder|yolla|olur|aynen|doğru|yap|hayır|hayir|vazgeç|iptal|gönderme|yapma|olmaz|dur)\b/i;
 let srvPend=false,srvSeen={};
 const srvOn=()=>!!(S.sU&&S.sT);
-function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 19:50 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
+function srvStat(){const e=$('sSt');if(!e)return;e.textContent='Sürüm 01.11 20:30 · '+(srvOn()?'Sunucu: bilgiler girili. Bekleyen çevrimdışı görev: '+store.get('queue',[]).length:'Sunucu bağlı değil. Adres ve şifreyi girersen mail, hafıza ve arka plan görevleri çalışır.')}
 async function srvCall(path,body,get){const url=S.sU.replace(/\/+$/,'')+path,headers={'Authorization':'Bearer '+S.sT,'Content-Type':'application/json'};const H=NATIVE&&PL('CapacitorHttp');
   if(H){const r=await(get?H.get({url,headers,connectTimeout:15000,readTimeout:70000}):H.post({url,headers,data:body,connectTimeout:15000,readTimeout:70000}));if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(r.status>=400)throw new Error('sunucu '+r.status);return typeof r.data==='string'?JSON.parse(r.data):r.data}
   const r=await tfetch(url,{method:get?'GET':'POST',headers,body:get?undefined:JSON.stringify(body)},70000);if(r.status===401)throw new Error('Sunucu şifresi yanlış.');if(!r.ok)throw new Error('sunucu '+r.status);return r.json()}
@@ -264,8 +268,8 @@ function queueTask(t){const q=store.get('queue',[]);q.push(t);store.set('queue',
 async function syncQueue(){const q=store.get('queue',[]);if(!q.length||!srvOn()||navigator.onLine===false)return;try{await srvCall('/tasks',{tasks:q});store.set('queue',[]);srvStat();log('s',q.length+' bekleyen görev sunucuya gönderildi, başlıyor.');return q.length}catch(e){log('s','Görevler gönderilemedi: '+e.message)}}
 async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);return o.reply||'Cevap gelmedi.'}
 async function srvRoute(text){
-  if(!srvOn())return null;
-  const isTask=TASKRX.test(text),isSrv=SRVRX.test(text)||(srvPend&&YESRX.test(text.trim()));
+  if(!srvOn())return MAILW.test(text)?'Mail göndermek için sunucu bağlı olmalı. Ayarlardan sunucu şifresini gir.':null;
+  const isTask=TASKRX.test(text),isSrv=MAILW.test(text)||(SRVRX.test(text)&&!/(aç|açsana|açar mısın|başlat)\s*$/.test(text.trim()))||(srvPend&&YESRX.test(text.trim()));
   if(!isTask&&!isSrv)return null;
   if(navigator.onLine===false){queueTask(text);return 'İnternet yok. İşi telefona kaydettim, bağlanınca sunucuya gönderip başlayacağım. Mail gibi önemli şey varsa göndermeden önce sana soracağım.'}
   try{
@@ -508,7 +512,8 @@ async function actCall(name){const em=emergency(name);if(em){pend={t:'confirm',f
   const r=await pickContact(name,'call');return r.err||await dialNow(r.c)}
 async function smsFlow(c,text){if(!text){pend={t:'smsText',c};return 'Ne yazayım?'}pend={t:'smsConfirm',c,text};return c.name+' kişisine şunu göndereyim mi: '+text+' ?'}
 async function actSms(name,text){const r=await pickContact(name,'sms',text);return r.err||await smsFlow(r.c,text)}
-async function actWa(name,text){const r=await pickContact(name,'wa',text);if(r.err)return r.err;return await waOpen(r.c,text)}
+async function actWa(name,text){if(text&&PL('JarvisView')&&PL('JarvisView').notifReply){try{const r=await PL('JarvisView').notifReply({name,text});if(r&&r.r==='ok')return name+' kişisine arka planda gönderdim.'}catch(e){}}
+  const r=await pickContact(name,'wa',text);if(r.err)return r.err;return await waOpen(r.c,text)}
 async function waOpen(c,text){let n=(c.number||'').replace(/\D/g,'');if(n.length===11&&n[0]==='0')n='9'+n;else if(n.length===10)n='90'+n;try{await PL('AppLauncher').openUrl({url:'https://wa.me/'+n+(text?'?text='+encodeURIComponent(text):'')})}catch(e){return'WhatsApp açılamadı.'}if(text&&await accOn()){await sleep(2500);let o=await PL('JarvisView').act({a:'click',text:'Gönder'});if(!(o&&o.ok))o=await PL('JarvisView').act({a:'click',text:'Send'});if(o&&o.ok)return c.name+' kişisine gönderdim.'}return c.name+' için WhatsApp açıldı'+(text?', gönder tuşuna bas.':'.')}
 const fm=(h,m)=>String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -520,7 +525,8 @@ async function llmJson(sys,user){let err;
   throw err||new Error('anahtar yok')}
 const AG_SYS='Bir Android telefonu erişilebilirlik ile adım adım kullanıyorsun. Her adımda SADECE tek bir JSON döndür: {"a":"click|type|scroll|back|home|open|wait|done|fail","text":"","idx":-1,"dir":"down","say":"kısa Türkçe açıklama"}. Ekran listesi satırları: idx|T(tıklanabilir)E(yazılabilir)|metin. click için listedeki idx kullan (yoksa text ver). type için text yaz (idx yazılabilir kutu). open için uygulama adını text olarak ver. Hedef bittiğinde done, olmayacaksa fail ver ve say alanına sonucu yaz. Aynı adımı tekrar tekrar deneme. WhatsApp mesajı yazınca Gönder/Send düğmesine tıkla. WhatsApp aramada sohbeti açıp Sesli arama/Voice call düğmesine tıkla. 112 gibi acil numaraları ARAMA. Para gönderme, satın alma, silme, hesap veya şifre değiştirme gibi geri alınamaz işlemleri YAPMA; fail ver ve nedenini söyle.';
 let agentOn=false;
-async function agent(goal){
+const AG_DEL=AG_SYS.replace('Para gönderme, satın alma, silme, hesap veya şifre değiştirme gibi geri alınamaz işlemleri YAPMA; fail ver ve nedenini söyle.','Kullanıcı SADECE görevde belirtilen mesajı silmeyi onayladı; başka hiçbir şeyi silme. Para gönderme, satın alma, hesap veya şifre değiştirme YAPMA.');
+async function agent(goal,del){
   if(!goal)return'';const J=PL('JarvisView');
   try{const L=await J.locked();if(L&&L.locked)return'Telefon kilitli. Kilidi sen aç, sonra yapayım.'}catch(e){}
   if(!await accOn())return'Bunun için erişilebilirlik iznini vermen lazım. Ayarlarda "erişilebilirlik izni ver" düğmesine bas ve Jarvis\'i aç.';
@@ -528,7 +534,7 @@ async function agent(goal){
   const hist=[];let res='';
   try{for(let i=0;i<16;i++){
     const sc=await scr();const lines=(sc.n||[]).map(n=>n.i+'|'+(n.c?'T':'')+(n.e?'E':'')+'|'+n.t).join('\n');
-    let raw,a;try{raw=await llmJson(AG_SYS,'GÖREV: '+goal+'\nÖNCEKİ ADIMLAR: '+(hist.join(' ; ')||'yok')+'\nAÇIK UYGULAMA: '+(sc.pkg||'bilinmiyor')+'\nEKRAN:\n'+lines);a=JSON.parse(raw.replace(/^```json|```$/g,''))}catch(e){res='Beynime ulaşamadım: '+String(e&&e.message||e).slice(0,60);break}
+    let raw,a;try{raw=await llmJson(del?AG_DEL:AG_SYS,'GÖREV: '+goal+'\nÖNCEKİ ADIMLAR: '+(hist.join(' ; ')||'yok')+'\nAÇIK UYGULAMA: '+(sc.pkg||'bilinmiyor')+'\nEKRAN:\n'+lines);a=JSON.parse(raw.replace(/^```json|```$/g,''))}catch(e){res='Beynime ulaşamadım: '+String(e&&e.message||e).slice(0,60);break}
     lastAct=Date.now();log('s','▸ '+(a.say||a.a));
     if(a.a==='done'){res=a.say||'Tamam, yaptım.';break}
     if(a.a==='fail'){res=a.say||'Yapamadım.';break}
@@ -576,8 +582,10 @@ async function phoneCmd(l,t){const J=PL('JarvisView');let m;
       if(P.then==='call')return await dialNow(c);if(P.then==='sms')return await smsFlow(c,P.text);if(P.then==='wa')return await waOpen(c,P.text)}
     if(P.t==='smsText')return await smsFlow(P.c,t);
     if(P.t==='smsConfirm'){if(/^(evet|gönder|tamam|olur|yolla|aynen|onaylıyorum)/.test(l)){const r=await J.sms({number:P.c.number,text:P.text,send:true});return r&&r.sent?'Gönderdim.':'Mesaj uygulaması açıldı, gönder tuşuna bas.'}return'Tamam, göndermedim.'}}
+  m=l.match(/^(.+?)['’]?\s*(?:ye|ya|e|a|na|ne)\s+cevap\w*\s*(?:ver|yaz|at)?\w*[:,]?\s+(.+)$/);if(m&&m[1].length<30&&!/\s(ve|ile)\s/.test(m[1])){const tx=(t.match(/cevap\w*\s*(?:ver\w*|yaz\w*|at\w*)?[:,]?\s+(.+)$/i)||[])[1]||m[2];return await actWa(m[1],tx)}
   m=l.match(/^(.+?)['’]?\s*(?:ye|ya|e|a|na|ne)\s+(whatsapp\w*|sms|mesaj)\s*(?:at|gönder|yaz|yolla)\w*[:,]?\s*(.*)$/);
   if(m){const txt=(t.match(/(?:at|gönder\w*|yaz\w*|yolla\w*)[:,]?\s+(.+)$/i)||[])[1]||'';return/^whatsapp/.test(m[2])?await actWa(m[1],txt):await actSms(m[1],txt)}
+  if(/(mesaj|whatsapp|konuşma|sohbet)/.test(l)&&/(^|\s)(sil|silsene|silebilir misin|silermisin|silar mısın|sil lütfen)(\s|$)/.test(l)){pend={t:'confirm',fn:()=>agent('Kullanıcı şunu istedi: "'+t+'". Doğru sohbeti aç, istenen mesaja uzun bas, sil seçeneğiyle SADECE o mesajı sil.',true)};return 'Bunu silmemi onaylıyor musun: '+t+' Evet de.'}
   if(/whats?app|vatsap/.test(l)&&/\bara(sın|r mısın|sana)?\b|arama/.test(l)&&!/mesaj|yaz/.test(l)){const nm=waName(l);
     if(nm&&nm.length<30&&J.waCall){try{const r=await J.waCall({name:nm,video:/görüntülü/.test(l)});if(r&&r.ok)return (r.name||nm)+" WhatsApp'ta aranıyor."}catch(e){}}
     return await agent('Kullanıcı şunu istedi: "'+t+'". WhatsApp\'ta ilgili kişiyi bul, sohbetini aç ve sesli ara.');}
