@@ -440,6 +440,7 @@ jobs:
             public void wakeState(PluginCall call) {
               JSObject r = new JSObject();
               r.put("running", WakeService.running);
+              r.put("heard", WakeService.heard + " #" + WakeService.events);
               r.put("error", WakeService.lastError == null ? "" : WakeService.lastError);
               r.put("overlay", Settings.canDrawOverlays(getContext()));
               PowerManager pw = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
@@ -506,6 +507,8 @@ jobs:
             static WakeService inst;
             static boolean running = false;
             static String lastError = "";
+            static String heard = "";
+            static int events = 0;
             private Model model;
             private SpeechService ss;
             private boolean paused = false;
@@ -525,7 +528,7 @@ jobs:
             private synchronized void startListen() {
               if (model == null || paused || ss != null) return;
               try {
-                Recognizer rec = new Recognizer(model, 16000.0f, "[\"jarvis\", \"service\", \"[unk]\"]");
+                Recognizer rec = new Recognizer(model, 16000.0f, "[\"jarvis\", \"service\", \"travis\", \"harvest\", \"jervis\", \"[unk]\"]");
                 ss = new SpeechService(rec, 16000.0f);
                 ss.startListening(this);
                 running = true;
@@ -614,7 +617,10 @@ jobs:
             private void check(String json) {
               if (paused || json == null) return;
               String t = json.toLowerCase();
-              if (t.contains("jarvis") || t.contains("service")) {
+              events++;
+              String hh = t.replaceAll("[^a-z\\[\\] ]", "").replace("partial", "").replace("text", "").trim();
+              if (hh.length() > 0) heard = hh;
+              if (t.contains("jarvis") || t.contains("service") || t.contains("travis") || t.contains("harvest") || t.contains("jervis")) {
                 long now = System.currentTimeMillis();
                 if (now - lastWake < 2500) return;
                 lastWake = now;
