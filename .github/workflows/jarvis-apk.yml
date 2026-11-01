@@ -171,6 +171,19 @@ jobs:
               }
             }
             @PluginMethod
+            public void listenInterrupt(PluginCall call) {
+              boolean on = call.getBoolean("on", false);
+              WakeService.interrupt = on;
+              if (on) WakeService.setPaused(false);
+              else if (OverlayActivity.alive) WakeService.setPaused(true);
+              call.resolve();
+            }
+            @PluginMethod
+            public void closeOverlay(PluginCall call) {
+              OverlayActivity.closeIfAlive();
+              call.resolve();
+            }
+            @PluginMethod
             public void unmute(PluginCall call) {
               try {
                 AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
@@ -764,6 +777,7 @@ jobs:
             private Model model;
             private SpeakerModel spk;
             static boolean enrolling = false;
+            static boolean interrupt = false;
             static int enrollCount = 0;
             static String lastDist = "";
             private SpeechService ss;
@@ -784,7 +798,7 @@ jobs:
             private synchronized void startListen() {
               if (model == null || paused || ss != null) return;
               try {
-                Recognizer rec = new Recognizer(model, 16000.0f, "[\"hey\", \"hay\", \"assistant\", \"assistance\", \"a system\", \"hey assistant\", \"jarvis\", \"[unk]\"]");
+                Recognizer rec = new Recognizer(model, 16000.0f, "[\"hey\", \"hay\", \"assistant\", \"assistance\", \"a system\", \"hey assistant\", \"jarvis\", \"stop\", \"[unk]\"]");
                 if (spk != null) { try { rec.setSpeakerModel(spk); } catch (Throwable e2) {} }
                 ss = new SpeechService(rec, 16000.0f);
                 ss.startListening(this);
@@ -914,6 +928,14 @@ jobs:
               if (paused || json == null) return;
               String t = json.toLowerCase();
               events++;
+              if (interrupt) {
+                String tt = t.replaceAll("\"spk\"\\s*:\\s*\\[[^\\]]*\\]", "");
+                if (tt.contains("jarvis") || tt.contains("assist") || tt.contains("stop") || tt.contains("system")) {
+                  interrupt = false;
+                  OverlayActivity.runJs("window.__stopSpeech&&window.__stopSpeech()");
+                }
+                return;
+              }
               String hh = t.replaceAll("\"spk\"\\s*:\\s*\\[[^\\]]*\\]", "").replaceAll("[^a-z\\[\\] ]", "").replace("partial", "").replace("text", "").replace("spkframes", "").trim();
               if (hh.length() > 0) heard = hh;
               boolean hit = t.contains("jarvis") || ((t.contains("hey") || t.contains("hay")) && (t.contains("assist") || t.contains("a system") || t.contains("asistan")));
@@ -1438,11 +1460,24 @@ jobs:
           public class OverlayActivity extends BridgeActivity {
             static boolean alive = false;
             static boolean keep = false;
+            static OverlayActivity inst;
+            static void runJs(final String js) {
+              final OverlayActivity o = inst;
+              if (o == null) return;
+              o.runOnUiThread(new Runnable() { public void run() { try { o.getBridge().getWebView().evaluateJavascript(js, null); } catch (Exception e) {} } });
+            }
+            static void closeIfAlive() {
+              final OverlayActivity o = inst;
+              if (o == null) return;
+              runJs("window.__stopSpeech&&window.__stopSpeech(true)");
+              o.runOnUiThread(new Runnable() { public void run() { new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable() { public void run() { try { o.finish(); } catch (Exception e) {} } }, 200); } });
+            }
             @Override
             public void onCreate(Bundle b) {
               registerPlugin(JarvisViewPlugin.class);
               super.onCreate(b);
               alive = true;
+              inst = this;
               if (android.os.Build.VERSION.SDK_INT >= 27) setShowWhenLocked(true);
               try { if (android.os.Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true); } } catch (Exception e) {}
               WakeService.setPaused(true);
@@ -1465,6 +1500,8 @@ jobs:
               super.onDestroy();
               alive = false;
               keep = false;
+              inst = null;
+              WakeService.interrupt = false;
               WakeService.setPaused(false);
             }
           }
