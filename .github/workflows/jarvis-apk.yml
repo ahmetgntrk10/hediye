@@ -425,7 +425,7 @@ jobs:
             public void wakeStart(PluginCall call) {
               try {
                 SharedPreferences sp = getContext().getSharedPreferences("jarvis", Context.MODE_PRIVATE);
-                sp.edit().putString("pv", call.getString("key", "")).apply();
+                sp.edit().putString("pv", call.getString("key", "")).putBoolean("wakeOn", true).apply();
                 ContextCompat.startForegroundService(getContext(), new Intent(getContext(), WakeService.class));
                 call.resolve();
               } catch (Exception e) { fail(call, e); }
@@ -433,6 +433,7 @@ jobs:
             @PluginMethod
             public void wakeStop(PluginCall call) {
               try {
+                getContext().getSharedPreferences("jarvis", Context.MODE_PRIVATE).edit().putBoolean("wakeOn", false).apply();
                 getContext().stopService(new Intent(getContext(), WakeService.class));
                 call.resolve();
               } catch (Exception e) { fail(call, e); }
@@ -681,6 +682,28 @@ jobs:
             static String lastError = "";
             static String heard = "";
             static int events = 0;
+            static void schedule(Context c, long ms) {
+              try {
+                android.app.AlarmManager am = (android.app.AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+                PendingIntent pi = PendingIntent.getBroadcast(c, 5, new Intent(c, WakeWatch.class), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + ms, pi);
+              } catch (Exception e) {}
+            }
+            static void ensure(Context c) {
+              try {
+                if (!c.getSharedPreferences("jarvis", Context.MODE_PRIVATE).getBoolean("wakeOn", false)) return;
+                schedule(c, 10 * 60 * 1000L);
+                if (running && inst != null) return;
+                androidx.core.content.ContextCompat.startForegroundService(c, new Intent(c, WakeService.class));
+              } catch (Throwable e) {
+                lastError = "arka planda başlatılamadı: " + e.getMessage();
+              }
+            }
+            @Override
+            public void onTaskRemoved(Intent rootIntent) {
+              schedule(this, 3000L);
+              super.onTaskRemoved(rootIntent);
+            }
             private Model model;
             private SpeakerModel spk;
             static boolean enrolling = false;
@@ -766,6 +789,7 @@ jobs:
             @Override
             public int onStartCommand(Intent intent, int flags, int startId) {
               if (intent != null && "STOP".equals(intent.getAction())) {
+                getSharedPreferences("jarvis", Context.MODE_PRIVATE).edit().putBoolean("wakeOn", false).apply();
                 stopSelf();
                 return START_NOT_STICKY;
               }
@@ -797,6 +821,7 @@ jobs:
               }
               running = true;
               lastError = "";
+              schedule(this, 10 * 60 * 1000L);
               if (model == null) loadModel(); else startListen();
               return START_STICKY;
             }
@@ -1131,6 +1156,7 @@ jobs:
             @Override
             public void onListenerConnected() {
               inst = this;
+              WakeService.ensure(this);
               tts = new TextToSpeech(getApplicationContext(), new TextToSpeech.OnInitListener() {
                 public void onInit(int st) {
                   ready = st == TextToSpeech.SUCCESS;
@@ -1216,10 +1242,27 @@ jobs:
             }
           }
           JAVA
+          cat > $D/WakeWatch.java <<'JAVA'
+          package com.tapverse.jarvis;
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+          public class WakeWatch extends BroadcastReceiver {
+            @Override
+            public void onReceive(Context c, Intent i) {
+              WakeService.ensure(c);
+            }
+          }
+          JAVA
           cat > $D/JarvisInteractionService.java <<'JAVA'
           package com.tapverse.jarvis;
           import android.service.voice.VoiceInteractionService;
           public class JarvisInteractionService extends VoiceInteractionService {
+            @Override
+            public void onReady() {
+              super.onReady();
+              WakeService.ensure(this);
+            }
           }
           JAVA
           cat > $D/JarvisSessionService.java <<'JAVA'
@@ -1324,8 +1367,8 @@ jobs:
           }
           JAVA
           M=android/app/src/main/AndroidManifest.xml
-          sed -i 's#<uses-permission android:name="android.permission.VIBRATE"/>#<uses-permission android:name="android.permission.VIBRATE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><uses-permission android:name="android.permission.ANSWER_PHONE_CALLS"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/><uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/><uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>#' $M
-          sed -i 's#</application>#<activity android:name=".OverlayActivity" android:theme="@style/OverlayTheme" android:launchMode="singleTask" android:excludeFromRecents="true" android:taskAffinity="" android:exported="false" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"/><service android:name=".JarvisInteractionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"><intent-filter><action android:name="android.service.voice.VoiceInteractionService"/></intent-filter><meta-data android:name="android.voice_interaction" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisSessionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"/><service android:name=".JarvisRecognizer" android:exported="true"><intent-filter><action android:name="android.speech.RecognitionService"/></intent-filter><meta-data android:name="android.speech" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisAccess" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/jarvis_access"/></service><service android:name=".JarvisNotif" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true"><intent-filter><action android:name="android.service.notification.NotificationListenerService"/></intent-filter></service><service android:name=".WakeService" android:foregroundServiceType="microphone" android:exported="false"/></application>#' $M
+          sed -i 's#<uses-permission android:name="android.permission.VIBRATE"/>#<uses-permission android:name="android.permission.VIBRATE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/><uses-permission android:name="android.permission.ANSWER_PHONE_CALLS"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/><uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/><uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>#' $M
+          sed -i 's#</application>#<activity android:name=".OverlayActivity" android:theme="@style/OverlayTheme" android:launchMode="singleTask" android:excludeFromRecents="true" android:taskAffinity="" android:exported="false" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"/><service android:name=".JarvisInteractionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"><intent-filter><action android:name="android.service.voice.VoiceInteractionService"/></intent-filter><meta-data android:name="android.voice_interaction" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisSessionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"/><service android:name=".JarvisRecognizer" android:exported="true"><intent-filter><action android:name="android.speech.RecognitionService"/></intent-filter><meta-data android:name="android.speech" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisAccess" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true"><intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter><meta-data android:name="android.accessibilityservice" android:resource="@xml/jarvis_access"/></service><service android:name=".JarvisNotif" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true"><intent-filter><action android:name="android.service.notification.NotificationListenerService"/></intent-filter></service><receiver android:name=".WakeWatch" android:exported="true"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/></intent-filter></receiver><service android:name=".WakeService" android:foregroundServiceType="microphone" android:exported="false"/></application>#' $M
           S=android/app/src/main/res/values/styles.xml
           sed -i 's#</resources>#<style name="OverlayTheme" parent="Theme.AppCompat.NoActionBar"><item name="android:windowIsTranslucent">true</item><item name="android:windowBackground">@android:color/transparent</item><item name="android:backgroundDimEnabled">false</item><item name="android:windowAnimationStyle">@android:style/Animation.Translucent</item></style></resources>#' $S
           python3 - <<'PY'
