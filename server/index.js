@@ -29,6 +29,7 @@ const TOOLS = [
   { name: 'remember', description: 'Kullanıcı hakkında kalıcı bir bilgiyi hafızaya kaydeder (tercih, kişi, alışkanlık). Sadece kullanıcı söylediyse kaydet.', parameters: { type: 'OBJECT', properties: { text: { type: 'STRING' } }, required: ['text'] } },
   { name: 'recall', description: 'Hafızada arama yapar.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
   { name: 'web_search', description: 'İnternette güncel bilgi arar (haber, e-posta adresi, fiyat, adres...). Sonucu özet olarak döndürür.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
+  { name: 'recall_history', description: 'Geçmiş konuşmalarda ve yapılan işlerde arama yapar (ör. daha önce kime ne mesaj atıldı, ne söylendi).', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
   { name: 'phone_action', description: "Telefonda yapılacak işi uygulamaya iletir (sen yapmazsın, uygulama telefonda yapar). Türler: call(name) kişiyi ara; sms(name,text); wa(name,text) WhatsApp mesajı; alarm(h,m); timer(sec); torch(on); volume(level 0-100); open(app); nav(q) yol tarifi; settings(page: wifi|bluetooth|location|airplane|display|sound|battery). Birden çok kişi/iş varsa her biri için ayrı çağır. 112/155/110/156 gibi acil numaraları ASLA bu araçla arama.", parameters: { type: 'OBJECT', properties: { type: { type: 'STRING', enum: ['call', 'sms', 'wa', 'alarm', 'timer', 'torch', 'volume', 'open', 'nav', 'settings'] }, name: { type: 'STRING' }, text: { type: 'STRING' }, h: { type: 'INTEGER' }, m: { type: 'INTEGER' }, sec: { type: 'INTEGER' }, on: { type: 'BOOLEAN' }, level: { type: 'INTEGER' }, app: { type: 'STRING' }, q: { type: 'STRING' }, page: { type: 'STRING' } }, required: ['type'] } },
   { name: 'list_email_accounts', description: 'Kullanıcının e-posta gönderebileceği hesapların listesi.', parameters: { type: 'OBJECT', properties: {} } },
   { name: 'send_email', description: 'E-posta gönderme isteği hazırlar. Doğrudan göndermez; kullanıcı onayına sunar. account alanını kullanıcı açıkça söylemediyse ASLA tahmin etme, önce sor.', parameters: { type: 'OBJECT', properties: { account: { type: 'STRING', description: 'Gönderen hesap, listedekilerden biri' }, to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' } }, required: ['account', 'to', 'subject', 'body'] } }
@@ -45,6 +46,7 @@ async function webSearch(query) {
   return { sonuc: (j.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim() };
 }
 
+const fmtLog = x => { const d = new Date(x.created_at); const t = d.toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); return `[${t}] ${x.role === 'u' ? 'Kullanıcı' : x.role === 'a' ? 'Jarvis' : 'Yapılan iş'}: ${x.text}`; };
 async function runTool(name, args, ctx) {
   args = args || {};
   if (name === 'remember') { await q('insert into memories(text) values($1)', [String(args.text || '').slice(0, 500)]); return { tamam: true }; }
@@ -54,6 +56,11 @@ async function runTool(name, args, ctx) {
     return { sonuc: r.rows.map(x => x.text) };
   }
   if (name === 'web_search') return await webSearch(String(args.query || ''));
+  if (name === 'recall_history') {
+    const like = '%' + String(args.query || '').slice(0, 60) + '%';
+    const r = await q('select role,text,created_at from chat_log where text ilike $1 order by id desc limit 12', [like]);
+    return { sonuc: r.rows.map(x => fmtLog(x)) };
+  }
   if (name === 'phone_action') {
     const t = String(args.type || '');
     if (!['call', 'sms', 'wa', 'alarm', 'timer', 'torch', 'volume', 'open', 'nav', 'settings'].includes(t)) return { hata: 'bilinmeyen tür' };
@@ -152,6 +159,7 @@ async function deepFallback(text, history) {
 async function think(text, history, opts = {}) {
   const ctx = { approvals: [], actions: [], taskId: opts.taskId, mem: '' };
   try { const m = await q('select text from memories order by id desc limit 15'); ctx.mem = m.rows.map(x => '- ' + x.text).join('\n'); } catch (e) {}
+  try { const c = await q('select role,text,created_at from chat_log order by id desc limit 14'); ctx.mem += (ctx.mem ? '\n' : '') + 'SON OLAYLAR (yeniden eskiye):\n' + c.rows.map(fmtLog).join('\n'); } catch (e) {}
   let reply, err = '';
   if (DEEP_KEY) { try { reply = await deepLoop(text, history, ctx); } catch (e) { err = String(e.message || e); } }
   if (reply === undefined && !ctx.used && GEMINI_KEY) { try { reply = await geminiLoop(text, history, ctx); } catch (e) { err += ' | ' + String(e.message || e); } }
@@ -196,11 +204,18 @@ app.post('/chat', auth, async (req, res) => {
     const t0 = Date.now();
     const out = await think(text, history);
     out.ms = Date.now() - t0;
+    for (const a of out.actions || []) await q('insert into chat_log(role,text) values($1,$2)', ['s', `${a.t} ${a.name || a.app || a.q || ''}${a.text ? ': ' + a.text : ''}${a.h !== undefined ? ' ' + a.h + ':' + String(a.m || 0).padStart(2, '0') : ''}`.trim()]);
     await q('insert into chat_log(role,text) values($1,$2)', ['a', out.reply]);
     res.json(out);
   } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
 });
 
+app.post('/log', auth, async (req, res) => {
+  const u = String(req.body.u || '').slice(0, 500), a = String(req.body.a || '').slice(0, 500);
+  if (u) await q('insert into chat_log(role,text) values($1,$2)', ['u', u]);
+  if (a) await q('insert into chat_log(role,text) values($1,$2)', ['s', 'Telefonda yapıldı: ' + a]);
+  res.json({ ok: true });
+});
 app.post('/tasks', auth, async (req, res) => {
   const list = Array.isArray(req.body.tasks) ? req.body.tasks : [req.body.text];
   const ids = [];
