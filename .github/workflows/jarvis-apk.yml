@@ -455,6 +455,15 @@ jobs:
               } catch (Exception e) { fail(call, e); }
             }
             @PluginMethod
+            public void assistSettings(PluginCall call) {
+              try {
+                Intent i = new Intent(Settings.ACTION_VOICE_INPUT_SETTINGS);
+                try { getContext().startActivity(newTask(i)); }
+                catch (Exception e1) { getContext().startActivity(newTask(new Intent(Settings.ACTION_SETTINGS))); }
+                call.resolve();
+              } catch (Exception e) { fail(call, e); }
+            }
+            @PluginMethod
             public void batteryOpt(PluginCall call) {
               try {
                 Intent i;
@@ -655,6 +664,68 @@ jobs:
             }
           }
           JAVA
+          cat > $D/JarvisInteractionService.java <<'JAVA'
+          package com.tapverse.jarvis;
+          import android.service.voice.VoiceInteractionService;
+          public class JarvisInteractionService extends VoiceInteractionService {
+          }
+          JAVA
+          cat > $D/JarvisSessionService.java <<'JAVA'
+          package com.tapverse.jarvis;
+          import android.os.Bundle;
+          import android.service.voice.VoiceInteractionSession;
+          import android.service.voice.VoiceInteractionSessionService;
+          public class JarvisSessionService extends VoiceInteractionSessionService {
+            @Override
+            public VoiceInteractionSession onNewSession(Bundle args) {
+              return new JarvisSession(this);
+            }
+          }
+          JAVA
+          cat > $D/JarvisSession.java <<'JAVA'
+          package com.tapverse.jarvis;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.os.Bundle;
+          import android.service.voice.VoiceInteractionSession;
+          public class JarvisSession extends VoiceInteractionSession {
+            public JarvisSession(Context c) { super(c); }
+            @Override
+            public void onShow(Bundle args, int flags) {
+              super.onShow(args, flags);
+              try {
+                Intent i = new Intent(getContext(), OverlayActivity.class);
+                startAssistantActivity(i);
+              } catch (Exception e) {}
+              hide();
+            }
+          }
+          JAVA
+          cat > $D/JarvisRecognizer.java <<'JAVA'
+          package com.tapverse.jarvis;
+          import android.content.Intent;
+          import android.speech.RecognitionService;
+          import android.speech.SpeechRecognizer;
+          public class JarvisRecognizer extends RecognitionService {
+            @Override
+            protected void onStartListening(Intent i, Callback c) {
+              try { c.error(SpeechRecognizer.ERROR_CLIENT); } catch (Exception e) {}
+            }
+            @Override
+            protected void onCancel(Callback c) {}
+            @Override
+            protected void onStopListening(Callback c) {}
+          }
+          JAVA
+          mkdir -p android/app/src/main/res/xml
+          cat > android/app/src/main/res/xml/jarvis_interaction.xml <<'XML'
+          <?xml version="1.0" encoding="utf-8"?>
+          <voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+            android:sessionService="com.tapverse.jarvis.JarvisSessionService"
+            android:recognitionService="com.tapverse.jarvis.JarvisRecognizer"
+            android:supportsAssist="true"
+            android:supportsLaunchVoiceAssistFromKeyguard="true" />
+          XML
           cat > $D/OverlayActivity.java <<'JAVA'
           package com.tapverse.jarvis;
           import android.graphics.Color;
@@ -694,7 +765,7 @@ jobs:
           JAVA
           M=android/app/src/main/AndroidManifest.xml
           sed -i 's#<uses-permission android:name="android.permission.VIBRATE"/>#<uses-permission android:name="android.permission.VIBRATE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/><uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/><uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>#' $M
-          sed -i 's#</application>#<activity android:name=".OverlayActivity" android:theme="@style/OverlayTheme" android:launchMode="singleTask" android:excludeFromRecents="true" android:taskAffinity="" android:exported="false" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"/><service android:name=".WakeService" android:foregroundServiceType="microphone" android:exported="false"/></application>#' $M
+          sed -i 's#</application>#<activity android:name=".OverlayActivity" android:theme="@style/OverlayTheme" android:launchMode="singleTask" android:excludeFromRecents="true" android:taskAffinity="" android:exported="false" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"/><service android:name=".JarvisInteractionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"><intent-filter><action android:name="android.service.voice.VoiceInteractionService"/></intent-filter><meta-data android:name="android.voice_interaction" android:resource="@xml/jarvis_interaction"/></service><service android:name=".JarvisSessionService" android:permission="android.permission.BIND_VOICE_INTERACTION" android:exported="true"/><service android:name=".JarvisRecognizer" android:exported="true"><intent-filter><action android:name="android.speech.RecognitionService"/></intent-filter><meta-data android:name="android.speech" android:resource="@xml/jarvis_interaction"/></service><service android:name=".WakeService" android:foregroundServiceType="microphone" android:exported="false"/></application>#' $M
           S=android/app/src/main/res/values/styles.xml
           sed -i 's#</resources>#<style name="OverlayTheme" parent="Theme.AppCompat.NoActionBar"><item name="android:windowIsTranslucent">true</item><item name="android:windowBackground">@android:color/transparent</item><item name="android:backgroundDimEnabled">false</item><item name="android:windowAnimationStyle">@android:style/Animation.Translucent</item></style></resources>#' $S
           python3 - <<'PY'

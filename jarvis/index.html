@@ -70,6 +70,7 @@ body.mini #mini{display:block;position:fixed;left:10px;right:10px;bottom:12px;he
 <input type="hidden" id="kP">
 <div class="sw"><span>Başka ekrandayken "Hey asistan" deyince panel aç</span><input type="checkbox" id="wake"></div>
 <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="bOv" style="flex:1">üstte göster izni</button><button class="btn" id="bBat" style="flex:1">pil izni</button></div>
+<div style="margin-top:8px"><button class="btn" id="bAs" style="width:100%">Jarvis'i telefonun asistanı yap</button></div>
 <small id="wInfo"></small>
 <small>Hızlı mod açıkken hızlı Gemini modeli seçilir ve düşünme kapatılır; cevaplar birkaç saniyede gelir. Haber, fiyat gibi güncel sorularda Gemini otomatik Google'da arar.</small><small>Anahtarlar sadece bu telefonun tarayıcısında saklanır. Model adı yazmana gerek yok, en iyi mevcut model otomatik seçilir.</small>
 <div style="display:flex;gap:8px;margin-top:14px"><button class="btn" id="sTest" style="flex:1">test et</button><button class="btn on" id="sSave" style="flex:1">kaydet</button></div>
@@ -91,7 +92,7 @@ const sp=$('set');async function wakeInfo(){const J=PL('JarvisView');if(!NATIVE|
 async function applyWake(){const J=PL('JarvisView');if(!NATIVE||!J)return;try{if(S.wake){await ensurePerms();await J.wakeStart({key:S.kP})}else await J.wakeStop()}catch(e){log('s','Dinleme servisi: '+(e&&e.message||e))}setTimeout(wakeInfo,1200)}
 function openSet(v){sp.classList.toggle('on',v===undefined?!sp.classList.contains('on'):v);if(sp.classList.contains('on')){$('kG').value=S.kG;$('kD').value=S.kD;$('eng').value=S.eng;$('fast').checked=S.fast;$('vo').value=S.vo;$('vn').value=S.vn;$('always').checked=S.always;$('kP').value=S.kP;$('wake').checked=S.wake;wakeInfo();$('all').checked=S.all;$('prev').checked=S.prev}}
 $('bSet').onclick=()=>openSet();$('bSet2').onclick=()=>openSet(true);
-$('bOv').onclick=()=>{try{PL('JarvisView').overlayPerm()}catch(e){}};$('bBat').onclick=()=>{try{PL('JarvisView').batteryOpt()}catch(e){}};
+$('bOv').onclick=()=>{try{PL('JarvisView').overlayPerm()}catch(e){}};$('bAs').onclick=()=>{try{PL('JarvisView').assistSettings()}catch(e){}};$('bBat').onclick=()=>{try{PL('JarvisView').batteryOpt()}catch(e){}};
 $('sSave').onclick=()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;S.vo=$('vo').value;S.vn=$('vn').value;S.always=$('always').checked;S.kP=$('kP').value.trim();S.wake=$('wake').checked;S.all=$('all').checked;S.prev=$('prev').checked;for(const k in S)store.set(k==='fast'?'fast2':k==='always'?'always2':k,S[k]);openSet(false);$('cam').classList.toggle('on',S.prev&&camOn);models={};if(started)applyListen();applyWake()};
 $('sTest').onclick=async()=>{S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();S.eng=$('eng').value;S.fast=$('fast').checked;models={};$('sInfo').textContent='test ediliyor…';try{const r=await ask('Sadece "tamam" de.',[]);$('sInfo').textContent='Çalıştı ('+r.engine+' · '+r.model+'): '+r.text}catch(e){$('sInfo').textContent='Hata: '+e.message}};
 /* ---------- speech out ---------- */
