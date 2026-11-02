@@ -131,7 +131,7 @@ document.addEventListener('pointerdown',e=>{if(speaking&&!(e.target.closest&&e.t
 async function say(text){
   const t=clean(text);if(!t){return}
   stopSpeech();stopRec();speaking=true;lastAct=Date.now();setState('speak');try{PL('JarvisView')&&PL('JarvisView').unmute();NATIVE&&PL('JarvisView').listenInterrupt({on:true})}catch(e){}
-  if(S.vo==='gemini'&&S.kG&&navigator.onLine!==false&&Date.now()>(window._gtOff||0)){try{const d=await gemSpeak(t.slice(0,600));if(!speaking)return;await playPCM(d);if(speaking)after();return}catch(e){if(/429/.test(e.message))window._gtOff=Date.now()+15*60000;log('s','Gemini sesi olmadı ('+e.message+'), telefon sesine geçtim.');if(!speaking)return}}
+  if(S.vo==='gemini'&&S.kG&&!offline()&&Date.now()>(window._gtOff||0)){try{const d=await gemSpeak(t.slice(0,600));if(!speaking)return;await playPCM(d);if(speaking)after();return}catch(e){if(/429/.test(e.message))window._gtOff=Date.now()+15*60000;log('s','Gemini sesi olmadı ('+e.message+'), telefon sesine geçtim.');if(!speaking)return}}
   if(NATIVE&&PL('JarvisView')){try{await PL('JarvisView').ttsSpeak({text:t});if(speaking)after();return}catch(e){log('s','Telefon sesi olmadı: '+(e&&e.message||e))}}
   if(!('speechSynthesis' in window)){after();return}
   return new Promise(res=>{const parts=t.match(/[^.!?\n]+[.!?]?/g)||[t];let i=0;let fin=false;
@@ -261,6 +261,9 @@ async function ask(text,h,img,web){
 /* ---------- sunucu (Jarvis beyni) ---------- */
 const MAILW=/((e[- ]?posta|e[- ]?mail|mail)\w*.*(yaz|gönder|\bat\b|yolla|cevapla)|(yaz|gönder|yolla)\w*.*(e[- ]?posta|e[- ]?mail|mail))/i;
 const SRVRX=/(e[- ]?posta|e[- ]?mail|mail|gmail|hatırla\b|hatırlıyor musun|aklında tut|unutma|hafızana|hafızanda)/i;
+const NETERR=/Failed to fetch|NetworkError|resolve host|Unable to resolve|ENOTFOUND|timed? ?out|network|No address/i;
+function offline(){return navigator.onLine===false||Date.now()<(window._netBad||0)}
+addEventListener('online',()=>{window._netBad=0});
 const TASKRX=/(arka planda|ben yokken|ben dönene kadar|görev (ver|ekle|olarak)|sonra yap|internet gelince)/i;
 const YESRX=/^(evet|tamam|onay(la)?|gönder|yolla|olur|aynen|doğru|yap|hayır|hayir|vazgeç|iptal|gönderme|yapma|olmaz|dur)\b/i;
 let srvPend=false,srvSeen={};
@@ -276,25 +279,25 @@ async function runActs(list){const acts=[...list.filter(a=>QUIET.has(a.t)),...li
 async function resumeActs(){if(actsRunning)return;const r=store.get('rest',[]);if(!r||!r.length)return;log('s','Yarım kalan '+r.length+' iş devam ediyor.');const rs=await runActs(r);if(rs){log('j',rs);if(!MINI&&!busy)say(rs)}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(resumeActs,1200)});
 function queueTask(t){const q=store.get('queue',[]);q.push(t);store.set('queue',q);srvStat()}
-async function syncQueue(){const q=store.get('queue',[]);if(!q.length||!srvOn()||navigator.onLine===false)return;try{await srvCall('/tasks',{tasks:q});store.set('queue',[]);srvStat();log('s',q.length+' bekleyen görev sunucuya gönderildi, başlıyor.');return q.length}catch(e){log('s','Görevler gönderilemedi: '+e.message)}}
+async function syncQueue(){const q=store.get('queue',[]);if(!q.length||!srvOn()||offline())return;try{await srvCall('/tasks',{tasks:q});store.set('queue',[]);srvStat();log('s',q.length+' bekleyen görev sunucuya gönderildi, başlıyor.');return q.length}catch(e){log('s','Görevler gönderilemedi: '+e.message)}}
 async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);let r=o.reply||'';if(o.ms)log('s','sunucu '+(o.ms/1000).toFixed(1)+'s');if(NATIVE&&o.actions&&o.actions.length){const rs=await runActs(o.actions);if(rs&&(!r||/Yapamadım|yok|izin|Hangisi|Birden fazla/i.test(rs)))r+=(r?' ':'')+rs}return r||'Tamam.'}
 async function srvRoute(text){
   if(!srvOn())return MAILW.test(text)?'Mail göndermek için sunucu bağlı olmalı. Ayarlardan sunucu şifresini gir.':null;
   const isTask=TASKRX.test(text),isSrv=MAILW.test(text)||(SRVRX.test(text)&&!/(aç|açsana|açar mısın|başlat)\s*$/.test(text.trim()))||(srvPend&&YESRX.test(text.trim()));
-  if(!isTask&&!isSrv){if(navigator.onLine===false)return null;try{return await srvChat(text)}catch(e){if(/şifresi/.test(e.message))return e.message;log('s','Sunucuya ulaşamadım ('+e.message+'), telefondaki beyni deniyorum.');return null}}
-  if(navigator.onLine===false){queueTask(text);return 'İnternet yok. İşi telefona kaydettim, bağlanınca sunucuya gönderip başlayacağım. Mail gibi önemli şey varsa göndermeden önce sana soracağım.'}
+  if(!isTask&&!isSrv){if(offline())return null;try{return await srvChat(text)}catch(e){if(/şifresi/.test(e.message))return e.message;log('s','Sunucuya ulaşamadım ('+e.message+'), telefondaki beyni deniyorum.');return null}}
+  if(offline()){queueTask(text);return 'İnternet yok. İşi telefona kaydettim, bağlanınca sunucuya gönderip başlayacağım. Mail gibi önemli şey varsa göndermeden önce sana soracağım.'}
   try{
     if(isTask){await srvCall('/tasks',{text});return 'Görevi sunucuya verdim, arka planda yapacağım. Önemli bir şey çıkarsa sana soracağım.'}
     return await srvChat(text);
   }catch(e){if(/şifresi/.test(e.message))return e.message;queueTask(text);return 'Sunucuya ulaşamadım ('+e.message+'). İşi sıraya aldım, bağlanınca göndereceğim.'}
 }
-async function srvPoll(){if(!srvOn()||navigator.onLine===false)return;try{await syncQueue();const a=await srvCall('/approvals',null,true);const fresh=(a||[]).filter(x=>!srvSeen[x.id]);if(fresh.length){fresh.forEach(x=>srvSeen[x.id]=1);srvPend=true;const m='Onayını bekleyen iş var: '+fresh[0].summary+'. Yapayım mı? Evet ya da hayır de.';log('j',m);if(!MINI&&!busy)say(m)}
+async function srvPoll(){if(!srvOn()||offline())return;try{await syncQueue();const a=await srvCall('/approvals',null,true);const fresh=(a||[]).filter(x=>!srvSeen[x.id]);if(fresh.length){fresh.forEach(x=>srvSeen[x.id]=1);srvPend=true;const m='Onayını bekleyen iş var: '+fresh[0].summary+'. Yapayım mı? Evet ya da hayır de.';log('j',m);if(!MINI&&!busy)say(m)}
   const ts=await srvCall('/tasks',null,true);const dn=(ts||[]).filter(x=>x.status==='done'||x.status==='failed');const seen=store.get('tseen',null);if(seen===null){store.set('tseen',dn.map(x=>x.id))}else{const fr=dn.filter(x=>!seen.includes(x.id));if(fr.length){store.set('tseen',seen.concat(fr.map(x=>x.id)).slice(-200));const m='Arka plandaki işin bitti: '+String(fr[0].result||fr[0].text).slice(0,300);log('j',m);if(!MINI&&!busy)say(m)}}}catch(e){}}
 function srvBoot(){srvStat();setTimeout(resumeActs,3000);window.addEventListener('online',()=>{setTimeout(srvPoll,1500)});setTimeout(srvPoll,4000);setInterval(srvPoll,120000)}
 $('bDx').onclick=async()=>{const o=$('dx');const out=[];const P=()=>{o.textContent=out.join('\n')};
   const T=async(n,f)=>{out.push('… '+n);P();const i=out.length-1,t0=Date.now();try{const r=await f();out[i]='✓ '+n+' ('+Math.round((Date.now()-t0)/100)/10+'s) '+(r||'')}catch(e){out[i]='✗ '+n+': '+String(e&&e.message||e).slice(0,300)}P()};
   S.sU=$('sU').value.trim();S.sT=$('sT').value.trim();S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();
-  out.push('İnternet: '+(navigator.onLine===false?'YOK':'var')+' · Uygulama: '+(NATIVE?'telefon':'tarayıcı')+' · HTTP eklentisi: '+(PL('CapacitorHttp')?'var':'yok'));P();
+  out.push('İnternet: '+(offline()?'YOK':'var')+' · Uygulama: '+(NATIVE?'telefon':'tarayıcı')+' · HTTP eklentisi: '+(PL('CapacitorHttp')?'var':'yok'));P();
   await T('Sunucu açık mı',async()=>{const r=await srvCall('/health',null,true);return JSON.stringify(r)});
   await T('Şifre doğru mu',async()=>{const r=await srvCall('/approvals',null,true);return 'tamam, bekleyen onay: '+(r||[]).length});
   await T('Sunucu beyni (Gemini)',async()=>{const r=await srvCall('/chat',{text:'Sadece "tamam" de.',history:[]});return String(r.reply).slice(0,80)});
@@ -313,8 +316,8 @@ async function run(text){
     if(TALK.test(text)&&!/^(ayar|aç)/.test(text.trim())){clearInterval(iv);busy=false;setState('idle');const m2='Sesini öğrenmek için ayarlarda Sesimi öğren düğmesine bas, sonra hey asistan de.';log('j',m2);await say(m2);return}
     let r;if(RESTRICT&&/\b(ara|arar|arama|mesaj|whatsapp|sms|aç|kapat|alarm|rehber|kişi|kişisi|fener|ses|yaz|gönder|uygulama|kameray)\w*/i.test(text))r='Telefon kilitliyken bunu yapmam. Önce kilidi aç.';else r=await local(text);
     if(r===''){clearInterval(iv);busy=false;setState('idle');if(conv||S.always)setTimeout(listenOnce,250);return}
-    if(r){log('j',r);hist.push({r:'u',t:text},{r:'a',t:r});if(srvOn()&&navigator.onLine!==false)srvCall('/log',{u:text,a:r}).catch(()=>{});busy=false;await say(r);return}
-    if(navigator.onLine===false&&NATIVE){if(srvOn()&&(WEBQ.test(text)||SRVRX.test(text)||MAILW.test(text)||TASKRX.test(text))){queueTask(text);clearInterval(iv);busy=false;hist.push({r:'u',t:text},{r:'a',t:'Kaydettim.'});const m='İnternet yok. Bu işi kaydettim, internet gelince ben demeden arka planda yapacağım. Önemli bir şey çıkarsa önce sana soracağım.';log('j',m);await say(m);return}
+    if(r){log('j',r);hist.push({r:'u',t:text},{r:'a',t:r});if(srvOn()&&!offline())srvCall('/log',{u:text,a:r}).catch(()=>{});busy=false;await say(r);return}
+    if(offline()&&NATIVE){if(srvOn()&&(WEBQ.test(text)||SRVRX.test(text)||MAILW.test(text)||TASKRX.test(text))){queueTask(text);clearInterval(iv);busy=false;hist.push({r:'u',t:text},{r:'a',t:'Kaydettim.'});const m='İnternet yok. Bu işi kaydettim, internet gelince ben demeden arka planda yapacağım. Önemli bir şey çıkarsa önce sana soracağım.';log('j',m);await say(m);return}
       clearInterval(iv);busy=false;const m2='İnternet yok, bunu şu an yapamıyorum. İnternetsiz sadece telefon işlerini yaparım.';log('j',m2);await say(m2);return}
     {const sv=await srvRoute(text);if(sv!==null){hist.push({r:'u',t:text},{r:'a',t:sv});log('j',sv);clearInterval(iv);busy=false;await say(sv);return}}
     let img=null;if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&camOn)img=grab();
@@ -323,7 +326,7 @@ async function run(text){
     let txt=a.text;const acts=[];for(const am of [...txt.matchAll(/\[\[EYLEM\s*(\{[\s\S]*?\})\s*\]\]/g)]){txt=txt.replace(am[0],'').trim();try{acts.push(JSON.parse(am[1]))}catch(e){}}
     if(acts.length&&NATIVE){const rs=await runActs(acts);if(rs)txt=(txt?txt+' ':'')+rs}
     hist.push({r:'u',t:text},{r:'a',t:txt});log('j',txt);log('s',a.engine+' · '+a.model);busy=false;await say(txt);
-  }catch(e){clearInterval(iv);busy=false;setState('idle');log('s','Hata: '+e.message);msg(e.message,6000);if(/CORS|Failed to fetch|NetworkError/i.test(e.message))log('s','Bağlantı engellendi (tarayıcı izin vermiyor olabilir).');if(S.always)setTimeout(listenOnce,600)}
+  }catch(e){clearInterval(iv);busy=false;setState('idle');log('s','Hata: '+e.message);if(NETERR.test(e.message||'')){window._netBad=Date.now()+45000;if(srvOn()&&(WEBQ.test(text)||SRVRX.test(text)||MAILW.test(text)||TASKRX.test(text))){queueTask(text);const m='İnternet yok. Bu işi kaydettim, internet gelince kendim yapacağım.';log('j',m);await say(m)}else{const m='İnternet yok, bunu şimdi yapamam. Telefon işlerini yapabilirim.';log('j',m);await say(m)}return}msg(e.message,6000);if(/CORS|Failed to fetch|NetworkError/i.test(e.message))log('s','Bağlantı engellendi (tarayıcı izin vermiyor olabilir).');if(S.always)setTimeout(listenOnce,600)}
   clearInterval(iv);busy=false;
 }
 /* ---------- camera + hands ---------- */
@@ -596,9 +599,16 @@ async function phoneCmd(l,t){const J=PL('JarvisView');let m;
     if(P.t==='confirm'){if(/^(evet|tamam|ara|onay|aynen|olur|ara\b)/.test(l))return await P.fn();return'Tamam, aramadım.'}
     if(P.t==='pick'){const w={birinci:1,ilk:1,ikinci:2,üçüncü:3,dördüncü:4,beşinci:5},n=parseInt((l.match(/\d+/)||[])[0])||w[l.split(' ')[0]]||0,c=P.list[n-1];if(!c){pend=P;return'Hangisi? Numarasını söyle.'}
       if(P.then==='call')return await dialNow(c);if(P.then==='sms')return await smsFlow(c,P.text);if(P.then==='wa')return await waOpen(c,P.text)}
+    if(P.t==='waText')return await actWa(P.name,t);
     if(P.t==='smsText')return await smsFlow(P.c,t);
     if(P.t==='smsConfirm'){if(/^(evet|gönder|tamam|olur|yolla|aynen|onaylıyorum)/.test(l)){const r=await J.sms({number:P.c.number,text:P.text,send:true});return r&&r.sent?'Gönderdim.':'Mesaj uygulaması açıldı, gönder tuşuna bas.'}return'Tamam, göndermedim.'}}
   m=l.match(/^(.+?)['’]?\s*(?:ye|ya|e|a|na|ne)\s+cevap\w*\s*(?:ver|yaz|at)?\w*[:,]?\s+(.+)$/);if(m&&m[1].length<30&&!/\s(ve|ile)\s/.test(m[1])){const tx=(t.match(/cevap\w*\s*(?:ver\w*|yaz\w*|at\w*)?[:,]?\s+(.+)$/i)||[])[1]||m[2];return await actWa(m[1],tx)}
+  m=l.match(/^(?:whatsapp\w*\s+|vatsap\w*\s+)?(.+?)\s+(?:kişisine|kişiye|kisisine)\s*(.*)$/);
+  if(m&&/(whatsapp|vatsap|sms|mesaj)/.test(l)&&/(yaz|at|gönder|yolla)\w*/.test(m[2])&&!/(\s+ve\s+|\s+ile\s+|,)/.test(m[1])&&m[1].length<30){
+    const sms=/\bsms\b/.test(l);let tx=m[2].replace(/(whatsapp|vatsap)\w*/g,' ').replace(/\b(mesaj\w*|at|atar|gönder\w*|yaz\w*|yolla\w*|mısın|misin|musun|müsün|lütfen|diye|bir|sms|olarak)\b/g,' ').replace(/\s+/g,' ').trim();
+    if(sms)return await actSms(m[1],tx);
+    if(!tx){pend={t:'waText',name:m[1]};return 'Ne yazayım?'}
+    return await actWa(m[1],tx)}
   m=l.match(/^(.+?)['’]?\s*(?:ye|ya|e|a|na|ne)\s+(whatsapp\w*|sms|mesaj)\s*(?:at|gönder|yaz|yolla)\w*[:,]?\s*(.*)$/);
   if(m&&!/(\s+ve\s+|\s+ile\s+|,)/.test(m[1])){const txt=(t.match(/(?:at|gönder\w*|yaz\w*|yolla\w*)[:,]?\s+(.+)$/i)||[])[1]||'';return/^whatsapp/.test(m[2])?await actWa(m[1],txt):await actSms(m[1],txt)}
   if(/(mesaj|whatsapp|konuşma|sohbet)/.test(l)&&/(^|\s)(sil|silsene|silebilir misin|silermisin|silar mısın|sil lütfen)(\s|$)/.test(l)){pend={t:'confirm',fn:()=>agent('Kullanıcı şunu istedi: "'+t+'". Doğru sohbeti aç, istenen mesaja uzun bas, sil seçeneğiyle SADECE o mesajı sil.',true)};return 'Bunu silmemi onaylıyor musun: '+t+' Evet de.'}
