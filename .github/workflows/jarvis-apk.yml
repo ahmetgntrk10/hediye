@@ -610,6 +610,31 @@ jobs:
               });
             }
             @PluginMethod
+            public void ttsInfo(final PluginCall call) {
+              final JSObject r = new JSObject();
+              try {
+                AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+                r.put("vol", am.getStreamVolume(AudioManager.STREAM_MUSIC) + "/" + am.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+                r.put("ringer", am.getRingerMode());
+              } catch (Exception e) {}
+              try {
+                final android.speech.tts.TextToSpeech[] t = new android.speech.tts.TextToSpeech[1];
+                t[0] = new android.speech.tts.TextToSpeech(getContext().getApplicationContext(), new android.speech.tts.TextToSpeech.OnInitListener() {
+                  public void onInit(int st) {
+                    try {
+                      r.put("init", st == android.speech.tts.TextToSpeech.SUCCESS);
+                      if (st == android.speech.tts.TextToSpeech.SUCCESS) {
+                        r.put("engine", t[0].getDefaultEngine());
+                        r.put("trAvail", t[0].isLanguageAvailable(new java.util.Locale("tr", "TR")));
+                      }
+                      t[0].shutdown();
+                    } catch (Exception e) {}
+                    call.resolve(r);
+                  }
+                });
+              } catch (Exception e) { r.put("hata", String.valueOf(e)); call.resolve(r); }
+            }
+            @PluginMethod
             public void ttsStop(PluginCall call) {
               try { if (tts != null) tts.stop(); } catch (Exception e) {}
               for (PluginCall c : new java.util.ArrayList<PluginCall>(ttsCalls.values())) c.resolve();

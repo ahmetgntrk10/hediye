@@ -36,7 +36,7 @@ const TOOLS = [
   { name: 'phone_action', description: "Telefonda yapılacak işi uygulamaya iletir (sen yapmazsın, uygulama telefonda yapar). Türler: call(name) kişiyi ara; sms(name,text); wa(name,text) WhatsApp mesajı; alarm(h,m); timer(sec); torch(on); volume(level 0-100); open(app); nav(q) yol tarifi; settings(page: wifi|bluetooth|location|airplane|display|sound|battery). Birden çok kişi/iş varsa her biri için ayrı çağır. 112/155/110/156 gibi acil numaraları ASLA bu araçla arama.", parameters: { type: 'OBJECT', properties: { type: { type: 'STRING', enum: ['call', 'sms', 'wa', 'alarm', 'timer', 'torch', 'volume', 'open', 'nav', 'settings'] }, name: { type: 'STRING' }, text: { type: 'STRING' }, h: { type: 'INTEGER' }, m: { type: 'INTEGER' }, sec: { type: 'INTEGER' }, on: { type: 'BOOLEAN' }, level: { type: 'INTEGER' }, app: { type: 'STRING' }, q: { type: 'STRING' }, page: { type: 'STRING' } }, required: ['type'] } },
   { name: 'add_note', description: 'Kullanıcının söylediği notu kaydeder (not al, yaz, kaydet).', parameters: { type: 'OBJECT', properties: { text: { type: 'STRING' } }, required: ['text'] } },
   { name: 'list_notes', description: 'Kayıtlı notları listeler; query verilirse içinde arar.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } } } },
-  { name: 'add_reminder', description: 'Hatırlatıcı kurar. when: Türkiye saatiyle YYYY-MM-DDTHH:MM biçiminde, ŞİMDİ bilgisine göre hesapla. Zamanı belirsizse kullanıcıya sor.', parameters: { type: 'OBJECT', properties: { text: { type: 'STRING' }, when: { type: 'STRING' } }, required: ['text', 'when'] } },
+  { name: 'add_reminder', description: 'Hatırlatıcı kurar. when: Türkiye saatiyle YYYY-MM-DDTHH:MM biçiminde, ŞİMDİ bilgisine göre hesapla. Zamanı belirsizse kullanıcıya sor.', parameters: { type: 'OBJECT', properties: { text: { type: 'STRING' }, when: { type: 'STRING' }, minutes_from_now: { type: 'NUMBER', description: '"X dakika sonra" gibi göreli isteklerde bunu kullan (tam doğru), when verme.' } }, required: ['text'] } },
   { name: 'list_reminders', description: 'Bekleyen hatırlatıcıları listeler.', parameters: { type: 'OBJECT', properties: {} } },
   { name: 'cancel_reminder', description: 'Bir hatırlatıcıyı iptal eder (id ile).', parameters: { type: 'OBJECT', properties: { id: { type: 'NUMBER' } }, required: ['id'] } },
   { name: 'weather', description: 'Bir şehir için bugün ve yarının hava durumunu verir.', parameters: { type: 'OBJECT', properties: { city: { type: 'STRING' } }, required: ['city'] } },
@@ -169,9 +169,13 @@ async function runTool(name, args, ctx) {
     return { notlar: r.rows.map(x => x.text) };
   }
   if (name === 'add_reminder') {
-    const m = String(args.when || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
-    if (!m) return { hata: 'Zaman biçimi geçersiz, YYYY-MM-DDTHH:MM ver.' };
-    const due = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+03:00`);
+    let due;
+    if (args.minutes_from_now !== undefined && +args.minutes_from_now > 0) due = new Date(Date.now() + Math.round(+args.minutes_from_now * 60000));
+    else {
+      const m = String(args.when || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+      if (!m) return { hata: 'Zaman biçimi geçersiz, YYYY-MM-DDTHH:MM ver ya da minutes_from_now kullan.' };
+      due = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+03:00`);
+    }
     if (isNaN(due) || due.getTime() < Date.now() - 60000) return { hata: 'Bu zaman geçmişte. Kullanıcıya doğru zamanı sor.' };
     const r = await q('insert into reminders(text,due_at) values($1,$2) returning id', [String(args.text || '').slice(0, 300), due.toISOString()]);
     return { tamam: true, id: r.rows[0].id, zaman: trTime(due) };
@@ -323,7 +327,7 @@ const auth = (req, res, next) => {
   if (h === 'Bearer ' + TOKEN) return next();
   res.status(401).json({ error: 'yetkisiz' });
 };
-app.get('/health', (req, res) => res.json({ ok: true, ver: 'g6', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
+app.get('/health', (req, res) => res.json({ ok: true, ver: 'g7', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
 
 app.post('/chat', auth, async (req, res) => {
   try {
@@ -388,4 +392,4 @@ await init();
 const PORT = +ENV.PORT || 3000;
 app.listen(PORT, () => console.log('Jarvis sunucusu hazır :' + PORT));
 setInterval(worker, 5000);
-setInterval(remindWorker, 20000);
+setInterval(remindWorker, 8000);

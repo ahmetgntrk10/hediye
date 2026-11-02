@@ -245,8 +245,8 @@ async function viaGemini(text,h,img,web){const list=await gList();let err;const 
   for(const m of list.slice(0,S.fast?2:4)){
     const variants=[];const pro=/pro/.test(m);
     const base={systemInstruction:{parts:[{text:SYS+ACT_SYS}]},contents},nt={generationConfig:{thinkingConfig:{thinkingBudget:0}}};
-    if(web){if(!pro&&S.fast)variants.push({...base,...nt,tools:[{google_search:{}}]});variants.push({...base,tools:[{google_search:{}}]})}
-    if(!pro&&S.fast)variants.push({...base,...nt});
+    if(web){if(!pro&&!/lite/.test(m)&&S.fast)variants.push({...base,...nt,tools:[{google_search:{}}]});variants.push({...base,tools:[{google_search:{}}]})}
+    if(!pro&&!/lite/.test(m)&&S.fast)variants.push({...base,...nt});
     variants.push(base);
     for(const body of variants){const left=LIM-(Date.now()-T0);if(left<2500){throw err||new Error('zaman aşımı')}try{log('s','deniyorum: '+m.replace('models/','')+(body.tools?' + web':''));const r=await tfetch('https://generativelanguage.googleapis.com/v1beta/'+m+':generateContent',{method:'POST',headers:{'x-goog-api-key':S.kG,'content-type':'application/json'},body:JSON.stringify(body)},Math.min(S.fast?8000:30000,left));if(!r.ok)throw new Error('Gemini '+r.status+': '+(await r.text()).slice(0,140));const j=await r.json();const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();if(!t)throw new Error('boş cevap');try{store.set('gm',m)}catch(e){}return{text:t,engine:'Gemini'+(body.tools?' + web':''),model:m.replace('models/','')}}catch(e){err=e;log('s','  → '+e.message.slice(0,90));if(!/ 400/.test(e.message))break}}
     if(/ 40[13]/.test(err.message)&&!/quota|limit|exhaust/i.test(err.message))break}
@@ -303,6 +303,7 @@ $('bDx').onclick=async()=>{const o=$('dx');const out=[];const P=()=>{o.textConte
   await T('Sunucu beyni (Gemini)',async()=>{const r=await srvCall('/chat',{text:'Sadece "tamam" de.',history:[]});return String(r.reply).slice(0,80)});
   await T('Telefondaki Gemini',async()=>{const r=await ask('Sadece "tamam" de.',[]);return r.engine+' · '+r.model});
   if(NATIVE){const J2=PL('JarvisView');await T('Ses motoru',async()=>{const i=await J2.ttsInfo();let sp='konuştu';try{await J2.ttsSpeak({text:'Ses testi. Jarvis konuşuyor.'})}catch(e){sp='HATA: '+(e&&e.message||e)}return JSON.stringify(i)+' · '+sp+' (trLang: 0/1 = var, -1 = ses dosyası yok, -2 = Türkçe yok)'})}
+  if(NATIVE){await T('Telefon sesi',async()=>{const r=await PL('JarvisView').ttsInfo();let sp='';try{await PL('JarvisView').ttsSpeak({text:'Ses testi.'});sp=' · söyledi'}catch(e){sp=' · SÖYLEYEMEDİ: '+(e&&e.message||e)}return JSON.stringify(r)+sp})}
   if(NATIVE){const J=PL('JarvisView');await T('Telefon eklentisi',async()=>{const r=await J.wakeState();return 'Erişilebilirlik: '+(await J.accState().then(x=>JSON.stringify(x)).catch(e=>'?'))})}
   if(NATIVE){await T('Hey asistan dinleyicisi',async()=>{const r=await PL('JarvisView').wakeState();return JSON.stringify(r)})}
   out.push('Bitti. Bu yazıların ekran görüntüsünü gönder.');P()};
