@@ -23,6 +23,7 @@ async function init() {
   await q(`create table if not exists approvals(id serial primary key, kind text not null, payload jsonb not null, summary text not null, status text default 'pending', created_at timestamptz default now(), decided_at timestamptz, task_id int)`);
   await q(`create table if not exists notes(id serial primary key, text text not null, created_at timestamptz default now())`);
   await q(`create table if not exists reminders(id serial primary key, text text not null, due_at timestamptz not null, status text default 'pending', created_at timestamptz default now())`);
+  await q(`alter table reminders add column if not exists pushed boolean default false`);
   await q(`create table if not exists chat_log(id serial primary key, role text, text text, created_at timestamptz default now())`);
 }
 
@@ -72,6 +73,18 @@ async function searchDDG(query) {
   let m; while ((m = re.exec(h)) && out.length < 5) out.push(untag(m[1]) + ': ' + untag(m[2]).slice(0, 300));
   if (!out.length) throw new Error('ddg bos');
   return out.join('\n');
+}
+const NTFY_URL = (process.env.NTFY_URL || '').replace(/\/$/, '');
+const NTFY_TOPIC = process.env.NTFY_TOPIC || '';
+const NTFY_TOKEN = process.env.NTFY_TOKEN || '';
+async function push(title, text) {
+  if (!NTFY_URL || !NTFY_TOPIC) return false;
+  try {
+    const h = { Title: encodeURIComponent(title), Priority: 'high', Tags: 'bell' };
+    if (NTFY_TOKEN) h.Authorization = 'Bearer ' + NTFY_TOKEN;
+    const r = await fetch(NTFY_URL + '/' + encodeURIComponent(NTFY_TOPIC), { method: 'POST', headers: h, body: text });
+    return r.ok;
+  } catch (e) { return false; }
 }
 const SERPER_KEY = process.env.SERPER_API_KEY || '';
 const SEARX_URL = (process.env.SEARXNG_URL || '').replace(/\/$/, '');
@@ -286,7 +299,7 @@ const auth = (req, res, next) => {
   if (h === 'Bearer ' + TOKEN) return next();
   res.status(401).json({ error: 'yetkisiz' });
 };
-app.get('/health', (req, res) => res.json({ ok: true, ver: 'g4', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length }));
+app.get('/health', (req, res) => res.json({ ok: true, ver: 'g5', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, ntfy: !!(NTFY_URL && NTFY_TOPIC) }));
 
 app.post('/chat', auth, async (req, res) => {
   try {
@@ -325,6 +338,13 @@ app.post('/reminders/:id/ack', auth, async (req, res) => { await q(`update remin
 app.post('/approvals/:id', auth, async (req, res) => res.json(await decide(+req.params.id, !!req.body.approve)));
 
 let busy = false;
+async function remindWorker() {
+  if (!NTFY_URL || !NTFY_TOPIC) return;
+  try {
+    const r = await q(`select id,text from reminders where status='pending' and pushed is not true and due_at <= now() order by due_at limit 5`);
+    for (const x of r.rows) { const ok = await push('Hatırlatma', x.text); if (ok) await q('update reminders set pushed=true where id=$1', [x.id]); }
+  } catch (e) { console.error('remind', e.message); }
+}
 async function worker() {
   if (busy) return; busy = true;
   try {
@@ -344,3 +364,4 @@ await init();
 const PORT = +ENV.PORT || 3000;
 app.listen(PORT, () => console.log('Jarvis sunucusu hazır :' + PORT));
 setInterval(worker, 5000);
+setInterval(remindWorker, 20000);
