@@ -588,6 +588,28 @@ jobs:
               } else speakNow(call, text);
             }
             @PluginMethod
+            public void ttsInfo(final PluginCall call) {
+              final android.media.AudioManager am = (android.media.AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+              final int vol = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC), mx = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
+              final android.speech.tts.TextToSpeech[] box = new android.speech.tts.TextToSpeech[1];
+              box[0] = new android.speech.tts.TextToSpeech(getContext().getApplicationContext(), new android.speech.tts.TextToSpeech.OnInitListener() {
+                public void onInit(int st) {
+                  JSObject r = new JSObject();
+                  r.put("init", st == android.speech.tts.TextToSpeech.SUCCESS);
+                  try {
+                    if (st == android.speech.tts.TextToSpeech.SUCCESS) {
+                      r.put("engine", box[0].getDefaultEngine());
+                      r.put("trLang", box[0].isLanguageAvailable(new java.util.Locale("tr", "TR")));
+                    }
+                  } catch (Exception e) { r.put("err", String.valueOf(e.getMessage())); }
+                  r.put("vol", vol);
+                  r.put("max", mx);
+                  try { box[0].shutdown(); } catch (Exception e) {}
+                  call.resolve(r);
+                }
+              });
+            }
+            @PluginMethod
             public void ttsStop(PluginCall call) {
               try { if (tts != null) tts.stop(); } catch (Exception e) {}
               for (PluginCall c : new java.util.ArrayList<PluginCall>(ttsCalls.values())) c.resolve();
