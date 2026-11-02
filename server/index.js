@@ -432,7 +432,7 @@ const kvSet = async (k, v) => q('insert into kv(k,v) values($1,$2) on conflict(k
 async function scheduler() {
   try {
     const now = new Date(); const hm = now.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).slice(11, 16), day = now.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).slice(0, 10);
-    const BT = ENV.BRIEF_TIME || '08:00';
+    const BT = ENV.BRIEF_TIME || 'off';
     if (BT !== 'off' && hm >= BT && hm < '11:00' && (await kvGet('brief_day')) !== day) {
       await kvSet('brief_day', day);
       const o = await think('Sabah özeti hazırla. Hava (şehri hafızadan bul, yoksa hava kısmını atla), bugünkü hatırlatıcılar, cevapsız önemli mesajlar, Türkiye ve dünyadan 2 önemli haber. En fazla 4 kısa cümle, bu özet için 2 cümle sınırı geçerli değil.', [], {});
