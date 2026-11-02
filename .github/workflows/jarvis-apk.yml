@@ -610,6 +610,16 @@ jobs:
               });
             }
             @PluginMethod
+            public void minVol(PluginCall call) {
+              try {
+                AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+                int mx = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                int want = mx * call.getInt("pct", 50) / 100;
+                if (am.getStreamVolume(AudioManager.STREAM_MUSIC) < want) am.setStreamVolume(AudioManager.STREAM_MUSIC, want, 0);
+              } catch (Exception e) {}
+              call.resolve();
+            }
+            @PluginMethod
             public void ttsDiag(final PluginCall call) {
               final JSObject r = new JSObject();
               try {
@@ -1340,6 +1350,7 @@ jobs:
                   CharSequence x0 = b0.getCharSequence(Notification.EXTRA_TEXT);
                   if (t0 != null && x0 != null && t0.toString().toLowerCase().contains("atirlatma") && seen.add(sbn.getKey() + "|" + x0)) {
                     AudioManager am0 = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                    try { int mx0 = am0.getStreamMaxVolume(AudioManager.STREAM_MUSIC); if (am0.getStreamVolume(AudioManager.STREAM_MUSIC) < mx0 / 2) am0.setStreamVolume(AudioManager.STREAM_MUSIC, mx0 / 2, 0); } catch (Exception e0) {}
                     if (am0.getMode() == AudioManager.MODE_NORMAL) tts.speak("Hatırlatma: " + x0, TextToSpeech.QUEUE_ADD, null, "r" + System.nanoTime());
                   }
                   return;
