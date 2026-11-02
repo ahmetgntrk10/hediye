@@ -338,6 +338,7 @@ async function deepFallback(text, history) {
   return ((await r.json()).choices?.[0]?.message?.content || '').trim();
 }
 
+const cool = {};
 async function think(text, history, opts = {}) {
   const ctx = { approvals: [], actions: [], taskId: opts.taskId, mem: '' };
   try { const m = await q('select text from memories order by id desc limit 15'); ctx.mem = m.rows.map(x => '- ' + x.text).join('\n'); } catch (e) {}
@@ -346,10 +347,14 @@ async function think(text, history, opts = {}) {
   ctx.mem = 'ŞİMDİ (Türkiye saati): ' + new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).slice(0, 16).replace(' ', 'T') + ' (' + trTime(new Date()) + ')\n' + ctx.mem;
   let reply, err = '';
   const sira = [];
-  if (ANTH_KEY) sira.push(() => claudeLoop(text, history, ctx));
-  if (OAI_KEY) sira.push(() => oaiLoop(text, history, ctx, OAI_BASE, OAI_KEY, OAI_MODEL, 'OpenAI'));
-  if (DEEP_KEY) sira.push(() => deepLoop(text, history, ctx));
-  for (const f of sira) { if (reply !== undefined || ctx.used) break; try { reply = await f(); } catch (e) { err += (err ? ' | ' : '') + String(e.message || e); } }
+  if (ANTH_KEY) sira.push(['claude', () => claudeLoop(text, history, ctx)]);
+  if (OAI_KEY) sira.push(['openai', () => oaiLoop(text, history, ctx, OAI_BASE, OAI_KEY, OAI_MODEL, 'OpenAI')]);
+  if (DEEP_KEY) sira.push(['deepseek', () => deepLoop(text, history, ctx)]);
+  for (const [ad, f] of sira) {
+    if (reply !== undefined || ctx.used) break;
+    if ((cool[ad] || 0) > Date.now()) continue;
+    try { reply = await f(); } catch (e) { const m = String(e.message || e); err += (err ? ' | ' : '') + m; if (/ (401|402|403|429) |credit|quota|insufficient/i.test(m + ' ')) cool[ad] = Date.now() + 10 * 60000; }
+  }
   if (reply === undefined && !ctx.used && GEMINI_KEY) { try { reply = await geminiLoop(text, history, ctx); ctx.engine = 'Gemini'; } catch (e) { err += ' | ' + String(e.message || e); } }
   if (reply === undefined && !ctx.used && DEEP_KEY) { try { reply = await deepFallback(text, history); } catch (e) { err += ' | ' + String(e.message || e); } }
   if (reply === undefined) reply = 'Beynime ulaşamadım: ' + err.slice(0, 120);
@@ -379,7 +384,7 @@ const auth = (req, res, next) => {
   if (h === 'Bearer ' + TOKEN) return next();
   res.status(401).json({ error: 'yetkisiz' });
 };
-app.get('/health', (req, res) => res.json({ ok: true, ver: 'g9', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, claude: !!ANTH_KEY, openai: !!OAI_KEY, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
+app.get('/health', (req, res) => res.json({ ok: true, ver: 'g10', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, claude: !!ANTH_KEY, openai: !!OAI_KEY, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
 
 app.post('/chat', auth, async (req, res) => {
   try {
