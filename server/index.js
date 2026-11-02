@@ -40,6 +40,9 @@ const TOOLS = [
   { name: 'list_reminders', description: 'Bekleyen hatırlatıcıları listeler.', parameters: { type: 'OBJECT', properties: {} } },
   { name: 'cancel_reminder', description: 'Bir hatırlatıcıyı iptal eder (id ile).', parameters: { type: 'OBJECT', properties: { id: { type: 'NUMBER' } }, required: ['id'] } },
   { name: 'weather', description: 'Bir şehir için bugün ve yarının hava durumunu verir.', parameters: { type: 'OBJECT', properties: { city: { type: 'STRING' } }, required: ['city'] } },
+  { name: 'watch_add', description: 'Bir web sayfasını/fiyatı izlemeye alır; sayfa değişince kullanıcıya bildirim gider. Kullanıcı bir ürün/sayfa değişince haber ver derse kullan. url tam adres olmalı; bilmiyorsan web_search ile bul.', parameters: { type: 'OBJECT', properties: { url: { type: 'STRING' }, title: { type: 'STRING' } }, required: ['url'] } },
+  { name: 'watch_list', description: 'İzlenen sayfaların listesi.', parameters: { type: 'OBJECT', properties: {} } },
+  { name: 'watch_remove', description: 'İzlenen bir sayfayı kaldırır (uuid ile, watch_list verir).', parameters: { type: 'OBJECT', properties: { uuid: { type: 'STRING' } }, required: ['uuid'] } },
   { name: 'list_email_accounts', description: 'Kullanıcının e-posta gönderebileceği hesapların listesi.', parameters: { type: 'OBJECT', properties: {} } },
   { name: 'send_email', description: 'E-posta gönderme isteği hazırlar. Doğrudan göndermez; kullanıcı onayına sunar. account alanını kullanıcı açıkça söylemediyse ASLA tahmin etme, önce sor.', parameters: { type: 'OBJECT', properties: { account: { type: 'STRING', description: 'Gönderen hesap, listedekilerden biri' }, to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' } }, required: ['account', 'to', 'subject', 'body'] } }
 ];
@@ -122,6 +125,26 @@ async function webSearch(query) {
   return { hata: 'arama yapılamadı: ' + hatalar.join(', ') };
 }
 
+const CD_URL = (process.env.CHANGEDETECTION_URL || '').replace(/\/$/, '');
+const CD_KEY = process.env.CHANGEDETECTION_KEY || '';
+async function watchTool(name, args) {
+  if (!CD_URL || !CD_KEY) return { hata: 'Sayfa izleme bağlı değil (CHANGEDETECTION_URL/KEY yok).' };
+  const H = { 'x-api-key': CD_KEY, 'content-type': 'application/json' };
+  if (name === 'watch_add') {
+    const url = String(args.url || '').trim();
+    if (!/^https?:\/\//i.test(url)) return { hata: 'Geçerli bir adres ver (https://...).' };
+    const r = await fetch(CD_URL + '/api/v1/watch', { method: 'POST', headers: H, body: JSON.stringify({ url, title: String(args.title || '').slice(0, 100) }) });
+    return r.ok ? { tamam: true } : { hata: 'izleme eklenemedi ' + r.status };
+  }
+  if (name === 'watch_list') {
+    const r = await fetch(CD_URL + '/api/v1/watch', { headers: H });
+    if (!r.ok) return { hata: 'liste alınamadı ' + r.status };
+    const j = await r.json();
+    return { izlenenler: Object.entries(j).map(([id, w]) => ({ uuid: id, url: w.url, title: w.title })) };
+  }
+  const r = await fetch(CD_URL + '/api/v1/watch/' + encodeURIComponent(String(args.uuid || '')), { method: 'DELETE', headers: H });
+  return r.ok ? { tamam: true } : { hata: 'silinemedi ' + r.status };
+}
 const trTime = d => new Date(d).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' });
 async function weather(city) {
   const g = await (await fetch('https://geocoding-api.open-meteo.com/v1/search?count=1&language=tr&name=' + encodeURIComponent(city))).json();
@@ -159,6 +182,7 @@ async function runTool(name, args, ctx) {
   }
   if (name === 'cancel_reminder') { await q(`update reminders set status='done' where id=$1`, [+args.id || 0]); return { tamam: true }; }
   if (name === 'weather') return await weather(String(args.city || ''));
+  if (name === 'watch_add' || name === 'watch_list' || name === 'watch_remove') return await watchTool(name, args);
   if (name === 'web_search') return await webSearch(String(args.query || ''));
   if (name === 'recall_history') {
     const like = '%' + String(args.query || '').slice(0, 60) + '%';
@@ -299,7 +323,7 @@ const auth = (req, res, next) => {
   if (h === 'Bearer ' + TOKEN) return next();
   res.status(401).json({ error: 'yetkisiz' });
 };
-app.get('/health', (req, res) => res.json({ ok: true, ver: 'g5', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, ntfy: !!(NTFY_URL && NTFY_TOPIC) }));
+app.get('/health', (req, res) => res.json({ ok: true, ver: 'g6', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
 
 app.post('/chat', auth, async (req, res) => {
   try {
