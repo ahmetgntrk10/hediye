@@ -21,6 +21,8 @@ async function init() {
   await q(`create table if not exists memories(id serial primary key, text text not null, created_at timestamptz default now())`);
   await q(`create table if not exists tasks(id serial primary key, text text not null, status text default 'queued', result text, created_at timestamptz default now(), done_at timestamptz)`);
   await q(`create table if not exists approvals(id serial primary key, kind text not null, payload jsonb not null, summary text not null, status text default 'pending', created_at timestamptz default now(), decided_at timestamptz, task_id int)`);
+  await q(`create table if not exists notes(id serial primary key, text text not null, created_at timestamptz default now())`);
+  await q(`create table if not exists reminders(id serial primary key, text text not null, due_at timestamptz not null, status text default 'pending', created_at timestamptz default now())`);
   await q(`create table if not exists chat_log(id serial primary key, role text, text text, created_at timestamptz default now())`);
 }
 
@@ -31,6 +33,12 @@ const TOOLS = [
   { name: 'web_search', description: 'İnternette güncel bilgi arar (haber, e-posta adresi, fiyat, adres...). Sonucu özet olarak döndürür.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
   { name: 'recall_history', description: 'Geçmiş konuşmalarda ve yapılan işlerde arama yapar (ör. daha önce kime ne mesaj atıldı, ne söylendi).', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
   { name: 'phone_action', description: "Telefonda yapılacak işi uygulamaya iletir (sen yapmazsın, uygulama telefonda yapar). Türler: call(name) kişiyi ara; sms(name,text); wa(name,text) WhatsApp mesajı; alarm(h,m); timer(sec); torch(on); volume(level 0-100); open(app); nav(q) yol tarifi; settings(page: wifi|bluetooth|location|airplane|display|sound|battery). Birden çok kişi/iş varsa her biri için ayrı çağır. 112/155/110/156 gibi acil numaraları ASLA bu araçla arama.", parameters: { type: 'OBJECT', properties: { type: { type: 'STRING', enum: ['call', 'sms', 'wa', 'alarm', 'timer', 'torch', 'volume', 'open', 'nav', 'settings'] }, name: { type: 'STRING' }, text: { type: 'STRING' }, h: { type: 'INTEGER' }, m: { type: 'INTEGER' }, sec: { type: 'INTEGER' }, on: { type: 'BOOLEAN' }, level: { type: 'INTEGER' }, app: { type: 'STRING' }, q: { type: 'STRING' }, page: { type: 'STRING' } }, required: ['type'] } },
+  { name: 'add_note', description: 'Kullanıcının söylediği notu kaydeder (not al, yaz, kaydet).', parameters: { type: 'OBJECT', properties: { text: { type: 'STRING' } }, required: ['text'] } },
+  { name: 'list_notes', description: 'Kayıtlı notları listeler; query verilirse içinde arar.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } } } },
+  { name: 'add_reminder', description: 'Hatırlatıcı kurar. when: Türkiye saatiyle YYYY-MM-DDTHH:MM biçiminde, ŞİMDİ bilgisine göre hesapla. Zamanı belirsizse kullanıcıya sor.', parameters: { type: 'OBJECT', properties: { text: { type: 'STRING' }, when: { type: 'STRING' } }, required: ['text', 'when'] } },
+  { name: 'list_reminders', description: 'Bekleyen hatırlatıcıları listeler.', parameters: { type: 'OBJECT', properties: {} } },
+  { name: 'cancel_reminder', description: 'Bir hatırlatıcıyı iptal eder (id ile).', parameters: { type: 'OBJECT', properties: { id: { type: 'NUMBER' } }, required: ['id'] } },
+  { name: 'weather', description: 'Bir şehir için bugün ve yarının hava durumunu verir.', parameters: { type: 'OBJECT', properties: { city: { type: 'STRING' } }, required: ['city'] } },
   { name: 'list_email_accounts', description: 'Kullanıcının e-posta gönderebileceği hesapların listesi.', parameters: { type: 'OBJECT', properties: {} } },
   { name: 'send_email', description: 'E-posta gönderme isteği hazırlar. Doğrudan göndermez; kullanıcı onayına sunar. account alanını kullanıcı açıkça söylemediyse ASLA tahmin etme, önce sor.', parameters: { type: 'OBJECT', properties: { account: { type: 'STRING', description: 'Gönderen hesap, listedekilerden biri' }, to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' } }, required: ['account', 'to', 'subject', 'body'] } }
 ];
@@ -76,6 +84,14 @@ async function webSearch(query) {
   return { hata: 'arama yapılamadı: ' + hatalar.join(', ') };
 }
 
+const trTime = d => new Date(d).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' });
+async function weather(city) {
+  const g = await (await fetch('https://geocoding-api.open-meteo.com/v1/search?count=1&language=tr&name=' + encodeURIComponent(city))).json();
+  const p = g.results && g.results[0]; if (!p) return { hata: 'Şehir bulunamadı' };
+  const w = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${p.latitude}&longitude=${p.longitude}&current=temperature_2m,precipitation,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Europe%2FIstanbul&forecast_days=2`)).json();
+  return { sehir: p.name, simdi_derece: w.current?.temperature_2m, yagis_mm: w.current?.precipitation, bugun: { en_yuksek: w.daily?.temperature_2m_max?.[0], en_dusuk: w.daily?.temperature_2m_min?.[0], yagis_ihtimali: w.daily?.precipitation_probability_max?.[0] }, yarin: { en_yuksek: w.daily?.temperature_2m_max?.[1], en_dusuk: w.daily?.temperature_2m_min?.[1], yagis_ihtimali: w.daily?.precipitation_probability_max?.[1] } };
+}
+
 const fmtLog = x => { const d = new Date(x.created_at); const t = d.toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); return `[${t}] ${x.role === 'u' ? 'Kullanıcı' : x.role === 'a' ? 'Jarvis' : 'Yapılan iş'}: ${x.text}`; };
 async function runTool(name, args, ctx) {
   args = args || {};
@@ -85,6 +101,26 @@ async function runTool(name, args, ctx) {
     const r = await q('select text from memories where text ilike $1 order by id desc limit 10', [like]);
     return { sonuc: r.rows.map(x => x.text) };
   }
+  if (name === 'add_note') { await q('insert into notes(text) values($1)', [String(args.text || '').slice(0, 1000)]); return { tamam: true }; }
+  if (name === 'list_notes') {
+    const like = '%' + String(args.query || '').slice(0, 60) + '%';
+    const r = await q('select id,text,created_at from notes where text ilike $1 order by id desc limit 15', [like]);
+    return { notlar: r.rows.map(x => x.text) };
+  }
+  if (name === 'add_reminder') {
+    const m = String(args.when || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+    if (!m) return { hata: 'Zaman biçimi geçersiz, YYYY-MM-DDTHH:MM ver.' };
+    const due = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:00+03:00`);
+    if (isNaN(due) || due.getTime() < Date.now() - 60000) return { hata: 'Bu zaman geçmişte. Kullanıcıya doğru zamanı sor.' };
+    const r = await q('insert into reminders(text,due_at) values($1,$2) returning id', [String(args.text || '').slice(0, 300), due.toISOString()]);
+    return { tamam: true, id: r.rows[0].id, zaman: trTime(due) };
+  }
+  if (name === 'list_reminders') {
+    const r = await q(`select id,text,due_at from reminders where status='pending' order by due_at limit 20`);
+    return { hatirlaticilar: r.rows.map(x => ({ id: x.id, text: x.text, zaman: trTime(x.due_at) })) };
+  }
+  if (name === 'cancel_reminder') { await q(`update reminders set status='done' where id=$1`, [+args.id || 0]); return { tamam: true }; }
+  if (name === 'weather') return await weather(String(args.city || ''));
   if (name === 'web_search') return await webSearch(String(args.query || ''));
   if (name === 'recall_history') {
     const like = '%' + String(args.query || '').slice(0, 60) + '%';
@@ -134,7 +170,10 @@ Kurallar:
 - Emin olmadığın ya da riskli bir şey varsa kullanıcıya sor.
 - Telefonda yapılacak işler (arama, mesaj, alarm, zamanlayıcı, fener, ses, uygulama açma, yol tarifi, ayar) için phone_action aracını çağır; bunları sen yapamazsın, uygulama yapar.
 - Cevabın en fazla 2 kısa cümle olsun. Asla "istersen", "ister misin", "yardımcı olabilirim", "bakayım mı" gibi teklif ya da soru cümlesi kurma. Güncel bilgi gerekiyorsa "bakayım" deme, web_search ile bakıp sonucu söyle.
-- Önceki konuşmayı dikkate al: kısa sorular bir önceki konuyla ilgilidir.`;
+- Önceki konuşmayı dikkate al: kısa sorular bir önceki konuyla ilgilidir.
+- Kalıp komut bekleme: kullanıcı serbest konuşur, ne istediğini sen çıkar. Söylediğine bağlı yardımcı işler varsa (ör. "yarın Ankara'ya gidiyorum" → hava durumu, sabah alarmı, hatırlatma) küçük ve geri alınabilir olanları kendin yap, mesaj/mail/silme gibi riskli olanları sadece öner ve onay iste. Hepsini tek kısa cevapta söyle.
+- Not almak için add_note, hatırlatmak için add_reminder, hava için weather kullan. Hatırlatıcıda saati ŞİMDİ bilgisine göre hesapla.
+- Kullanıcı hakkında yeni kalıcı bilgi öğrenirsen (kişi kim, tercih, alışkanlık, hangi hesap) remember ile kaydet; bu şekilde onu zamanla tanırsın.`;
 
 async function geminiLoop(text, history, ctx) {
   const contents = [...history.map(h => ({ role: h.r === 'u' ? 'user' : 'model', parts: [{ text: h.t }] })), { role: 'user', parts: [{ text }] }];
@@ -190,6 +229,8 @@ async function think(text, history, opts = {}) {
   const ctx = { approvals: [], actions: [], taskId: opts.taskId, mem: '' };
   try { const m = await q('select text from memories order by id desc limit 15'); ctx.mem = m.rows.map(x => '- ' + x.text).join('\n'); } catch (e) {}
   try { const c = await q('select role,text,created_at from chat_log order by id desc limit 30'); ctx.mem += (ctx.mem ? '\n' : '') + 'SON OLAYLAR (yeniden eskiye):\n' + c.rows.map(fmtLog).join('\n'); } catch (e) {}
+  try { const hp = await q(`select id,text,due_at from reminders where status='pending' order by due_at limit 10`); if (hp.rows.length) ctx.mem += '\nBEKLEYEN HATIRLATICILAR:\n' + hp.rows.map(x => `#${x.id} ${trTime(x.due_at)}: ${x.text}`).join('\n'); } catch (e) {}
+  ctx.mem = 'ŞİMDİ (Türkiye saati): ' + new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).slice(0, 16).replace(' ', 'T') + ' (' + trTime(new Date()) + ')\n' + ctx.mem;
   let reply, err = '';
   if (DEEP_KEY) { try { reply = await deepLoop(text, history, ctx); } catch (e) { err = String(e.message || e); } }
   if (reply === undefined && !ctx.used && GEMINI_KEY) { try { reply = await geminiLoop(text, history, ctx); } catch (e) { err += ' | ' + String(e.message || e); } }
@@ -220,7 +261,7 @@ const auth = (req, res, next) => {
   if (h === 'Bearer ' + TOKEN) return next();
   res.status(401).json({ error: 'yetkisiz' });
 };
-app.get('/health', (req, res) => res.json({ ok: true, ver: 'g2', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length }));
+app.get('/health', (req, res) => res.json({ ok: true, ver: 'g3', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length }));
 
 app.post('/chat', auth, async (req, res) => {
   try {
@@ -254,6 +295,8 @@ app.post('/tasks', auth, async (req, res) => {
 });
 app.get('/tasks', auth, async (req, res) => res.json((await q('select id,text,status,result,created_at,done_at from tasks order by id desc limit 50')).rows));
 app.get('/approvals', auth, async (req, res) => res.json((await q(`select id,kind,summary,payload,status,created_at from approvals where status='pending' order by id`)).rows));
+app.get('/reminders/due', auth, async (req, res) => res.json((await q(`select id,text,due_at from reminders where status='pending' and due_at <= now() order by due_at limit 10`)).rows));
+app.post('/reminders/:id/ack', auth, async (req, res) => { await q(`update reminders set status='done' where id=$1`, [+req.params.id]); res.json({ ok: true }); });
 app.post('/approvals/:id', auth, async (req, res) => res.json(await decide(+req.params.id, !!req.body.approve)));
 
 let busy = false;

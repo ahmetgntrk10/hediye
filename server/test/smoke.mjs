@@ -10,6 +10,7 @@ const mock = http.createServer((req, res) => {
       const j = JSON.parse(b); const last = j.messages[j.messages.length - 1];
       if (last.role === 'tool') return res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Taslak hazır. Gönderilsin mi?' } }] }));
       if (/mail/.test(last.content)) return res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'send_email', arguments: JSON.stringify({ account: /yanlis/.test(last.content) ? 'baska@x.com' : 'a@x.com', to: 'info@sirket.com', subject: 'Merhaba', body: 'Uzun mesaj' }) } }] } }] }));
+      if (/hatirlat/.test(last.content)) return res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'c3', type: 'function', function: { name: 'add_reminder', arguments: JSON.stringify({ text: 'su ic', when: new Date(Date.now()+3600000+10800000).toISOString().slice(0,16) }) } }] } }] }));
       if (/alarm/.test(last.content)) return res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '', tool_calls: [{ id: 'c2', type: 'function', function: { name: 'phone_action', arguments: JSON.stringify({ type: 'alarm', h: 7, m: 0 }) } }] } }] }));
       return res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'Merhaba, iyiyim.' } }] }));
     }
@@ -41,9 +42,14 @@ console.log('gôrev', JSON.stringify(await post('/tasks', { tasks: ['a@x.com e m
 await new Promise(r => setTimeout(r, 6500));
 console.log('gorevler', JSON.stringify((await (await fetch('http://127.0.0.1:3111/tasks', { headers: H })).json()).map(t => [t.status, t.result])));
 console.log('görev onayı', JSON.stringify((await (await fetch('http://127.0.0.1:3111/approvals', { headers: H })).json()).map(a => a.summary)));
+const rem = await post('/chat', { text: 'hatirlat' });
+console.log('hatirlatici', JSON.stringify(rem));
 const fail=[];
 if(!(alarm[1].actions&&alarm[1].actions.length===1&&alarm[1].actions[0].t==='alarm'))fail.push('phone_action calismadi');
+const rl=await (await fetch('http://127.0.0.1:3111/reminders/due',{headers:H})).json();
 const chk=(c,m)=>{if(!c)fail.push(m)};
+chk(rem[1].reply&&!/ulaşamadım/.test(rem[1].reply),'hatirlatici cevabi yok');
+chk(Array.isArray(rl)&&rl.length===0,'hatirlatici erken geldi');
 chk(n8nHits.length===1&&n8nHits[0].account==='a@x.com','onay sonrasi n8n cagrilmadi');
 if(fail.length){console.log('HATA',fail);process.exit(1)}
 console.log('TAMAM');process.exit(0);
