@@ -143,10 +143,15 @@ function stopRec(){if(NATIVE&&recOn&&PL('SpeechRecognition')){try{PL('SpeechReco
 let muteHook=false;function muteBeep(ms){if(speaking)return;try{const J=PL('JarvisView');J&&J.mute({ms:ms||1100})}catch(e){}}
 let emptyN=0;
 function incomplete(t){const l=t.toLowerCase().trim();if(/[,…]$|\.\.\.$/.test(l))return true;const w=l.split(/\s+/);if(w.length<=1&&!/^(dur|sus|evet|hayır|tamam|iptal|kapat|durdur|geç|sonraki|önceki|devam|vazgeç|aç)$/.test(l))return true;return /(^|\s)(ve|ama|çünkü|yani|şey|e+|ee+|ıı+|hmm+|sonra|ki|diye|için|ile|bir|bu|şu|şunu|bunu|da|de|ya|veya|ben|bana|benim|kendime|gibi|falan|işte|mesela|bide|bi|hani|şöyle|ayrıca|önce|ardından|şuna|buna|ona|onu)$/.test(l)}
+let CN=null;
+const asc=x=>String(x||'').toLowerCase().replace(/ı/g,'i').replace(/ş/g,'s').replace(/ç/g,'c').replace(/ğ/g,'g').replace(/ö/g,'o').replace(/ü/g,'u').replace(/[^a-z0-9 ]/g,'');
+const phk=x=>asc(x).replace(/d/g,'t').replace(/b/g,'p').replace(/g/g,'k').replace(/h/g,'');
+async function loadCN(){if(CN!==null||!NATIVE)return;try{const r=await PL('JarvisView').contactNames();CN=JSON.parse(r.names||'[]').map(n=>({full:phk(n),toks:asc(n).split(' ').filter(t=>t.length>=3).map(phk)}));if(!CN.length)CN=null}catch(e){CN=null}}
+function bestAlt(list){if(!list||list.length<2||!CN||!CN.length)return list&&list[0]||'';let best=list[0],bs=-1;for(const a of list){const k=phk(a);let sc=0;for(const c of CN){if(c.full&&k.includes(c.full)){sc+=3;continue}for(const t of c.toks)if(k.split(' ').includes(t))sc+=1}if(sc>bs){bs=sc;best=a}}return best}
 async function listenNative(){const SN=PL('SpeechRecognition');if(recOn||speaking||enrolling)return;recOn=true;lastAct=Date.now();setState('listen');let t='';
   if(!muteHook){muteHook=true;try{SN.addListener('listeningState',e=>{if(e&&e.status==='stopped')muteBeep(1200)})}catch(e){}}muteBeep(1200);
-  try{const r=await SN.start({language:'tr-TR',maxResults:1,partialResults:false,popup:false});t=((r&&r.matches&&r.matches[0])||'').trim()}catch(e){if(/permission|izin/i.test(String(e&&e.message||e))){msg('Mikrofon izni verilmedi.');conv=false;setConv()}}
-  let more=0;while(t&&incomplete(t)&&more<2&&!enrolling){more++;let t2='';try{muteBeep(1200);const to=setTimeout(()=>{try{SN.stop()}catch(e){}},2600);const r2=await SN.start({language:'tr-TR',maxResults:1,partialResults:false,popup:false});clearTimeout(to);t2=((r2&&r2.matches&&r2.matches[0])||'').trim()}catch(e){}if(!t2)break;t+=' '+t2}
+  try{loadCN();const r=await SN.start({language:'tr-TR',maxResults:5,partialResults:false,popup:false});t=String(bestAlt(r&&r.matches)||'').trim()}catch(e){if(/permission|izin/i.test(String(e&&e.message||e))){msg('Mikrofon izni verilmedi.');conv=false;setConv()}}
+  let more=0;while(t&&incomplete(t)&&more<2&&!enrolling){more++;let t2='';try{muteBeep(1200);const to=setTimeout(()=>{try{SN.stop()}catch(e){}},2600);const r2=await SN.start({language:'tr-TR',maxResults:5,partialResults:false,popup:false});clearTimeout(to);t2=String(bestAlt(r2&&r2.matches)||'').trim()}catch(e){}if(!t2)break;t+=' '+t2}
   recOn=false;if(enrolling)return;if(t){emptyN=0;lastAct=Date.now();handleSpeech(t)}else{setState('idle');if(MINI&&++emptyN>=4){closePanel();return}if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}}
 let enrolling=false;
 function listenOnce(){

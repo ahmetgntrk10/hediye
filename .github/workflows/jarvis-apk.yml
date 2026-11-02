@@ -610,6 +610,23 @@ jobs:
               });
             }
             @PluginMethod
+            public void contactNames(PluginCall call) {
+              JSObject r = new JSObject();
+              org.json.JSONArray arr = new org.json.JSONArray();
+              android.database.Cursor c = null;
+              try {
+                c = getContext().getContentResolver().query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                  new String[] { ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME }, null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC");
+                java.util.HashSet<String> seen = new java.util.HashSet<String>();
+                while (c != null && c.moveToNext() && arr.length() < 800) {
+                  String n = c.getString(0);
+                  if (n != null && seen.add(n)) arr.put(n);
+                }
+              } catch (Exception e) {} finally { try { if (c != null) c.close(); } catch (Exception e2) {} }
+              r.put("names", arr.toString());
+              call.resolve(r);
+            }
+            @PluginMethod
             public void srvCfg(PluginCall call) {
               getContext().getSharedPreferences("jarvis", Context.MODE_PRIVATE).edit().putString("srvUrl", call.getString("url", "")).putString("srvTok", call.getString("token", "")).apply();
               call.resolve();
