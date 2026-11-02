@@ -560,7 +560,7 @@ jobs:
             private boolean ttsReady = false;
             private final java.util.Map<String, PluginCall> ttsCalls = new java.util.HashMap<String, PluginCall>();
             private void speakNow(PluginCall call, String text) {
-              if (!ttsReady) { call.reject("ses motoru yok"); return; }
+              if (!ttsReady || tts == null) { call.reject("Türkçe ses yok"); return; }
               String id = String.valueOf(System.nanoTime());
               ttsCalls.put(id, call);
               tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, id);
@@ -573,13 +573,15 @@ jobs:
                   public void onInit(int st) {
                     ttsReady = st == android.speech.tts.TextToSpeech.SUCCESS;
                     if (ttsReady) {
-                      tts.setLanguage(new java.util.Locale("tr", "TR"));
+                      int lr = tts.setLanguage(new java.util.Locale("tr", "TR"));
+                      if (lr < 0) { ttsReady = false; tts = null; speakNow(call, text); return; }
                       tts.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
                         public void onStart(String id) {}
                         public void onDone(String id) { PluginCall c = ttsCalls.remove(id); if (c != null) c.resolve(); }
-                        public void onError(String id) { PluginCall c = ttsCalls.remove(id); if (c != null) c.resolve(); }
+                        public void onError(String id) { PluginCall c = ttsCalls.remove(id); if (c != null) c.reject("ses hatası"); }
                       });
                     }
+                    if (!ttsReady) tts = null;
                     speakNow(call, text);
                   }
                 });
@@ -659,6 +661,12 @@ jobs:
             public void accState(PluginCall call) {
               JSObject r = new JSObject();
               r.put("on", JarvisAccess.inst != null);
+              boolean en = false;
+              try {
+                String v = Settings.Secure.getString(getContext().getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                en = v != null && v.contains(getContext().getPackageName());
+              } catch (Exception e) {}
+              r.put("enabled", en);
               call.resolve(r);
             }
             @PluginMethod

@@ -132,7 +132,7 @@ async function say(text){
   const t=clean(text);if(!t){return}
   stopSpeech();stopRec();speaking=true;lastAct=Date.now();setState('speak');try{PL('JarvisView')&&PL('JarvisView').unmute();NATIVE&&PL('JarvisView').listenInterrupt({on:true})}catch(e){}
   if(S.vo==='gemini'&&S.kG&&!offline()&&Date.now()>(window._gtOff||0)){try{const d=await gemSpeak(t.slice(0,600));if(!speaking)return;await playPCM(d);if(speaking)after();return}catch(e){if(/429/.test(e.message))window._gtOff=Date.now()+15*60000;log('s','Gemini sesi olmadı ('+e.message+'), telefon sesine geçtim.');if(!speaking)return}}
-  if(NATIVE&&PL('JarvisView')){try{await PL('JarvisView').ttsSpeak({text:t});if(speaking)after();return}catch(e){log('s','Telefon sesi olmadı: '+(e&&e.message||e))}}
+  if(NATIVE&&PL('JarvisView')){try{await PL('JarvisView').ttsSpeak({text:t});if(speaking)after();return}catch(e){log('s','Telefon sesi olmadı: '+(e&&e.message||e));if(!window._ttsWarn){window._ttsWarn=1;msg('Türkçe ses yok. Ayarlar > Metinden konuşma bölümünden Türkçe sesi indir. Şimdilik yazıyla cevap veriyorum.',9000)}}}
   if(!('speechSynthesis' in window)){after();return}
   return new Promise(res=>{const parts=t.match(/[^.!?\n]+[.!?]?/g)||[t];let i=0;let fin=false;
     const done=()=>{if(fin)return;fin=true;clearTimeout(wd);after();res()};let wd=setTimeout(done,Math.min(60000,t.length*120+4000));
@@ -535,7 +535,7 @@ async function actWa(name,text){if(text&&PL('JarvisView')&&PL('JarvisView').noti
 async function waOpen(c,text){let n=(c.number||'').replace(/\D/g,'');if(n.length===11&&n[0]==='0')n='9'+n;else if(n.length===10)n='90'+n;try{await PL('AppLauncher').openUrl({url:'https://wa.me/'+n+(text?'?text='+encodeURIComponent(text):'')})}catch(e){return'WhatsApp açılamadı.'}if(text&&await accOn()){await sleep(2500);let o=await PL('JarvisView').act({a:'click',text:'Gönder'});if(!(o&&o.ok))o=await PL('JarvisView').act({a:'click',text:'Send'});if(o&&o.ok)return c.name+' kişisine gönderdim.'}return c.name+' için WhatsApp açıldı'+(text?', gönder tuşuna bas.':'.')}
 const fm=(h,m)=>String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-async function accOn(){try{const r=await PL('JarvisView').accState();return!!(r&&r.on)}catch(e){return false}}
+let accWhy='';async function accOn(){try{const r=await PL('JarvisView').accState();accWhy=(r&&!r.on&&r.enabled)?'Erişilebilirlik açık görünüyor ama servis uyumuş. Ayarlarda Jarvis erişilebilirliğini kapatıp tekrar aç.':'Bunun için erişilebilirlik iznini vermen lazım. Ayarlarda "erişilebilirlik izni ver" düğmesine bas ve Jarvis\'i aç.';return!!(r&&r.on)}catch(e){return false}}
 async function scr(){try{const r=await PL('JarvisView').screen();return JSON.parse(r.nodes||'{"pkg":"","n":[]}')}catch(e){return{pkg:'',n:[]}}}
 function jx(x){x=String(x||'');const a=x.indexOf('{'),b=x.lastIndexOf('}');return a>=0&&b>a?x.slice(a,b+1):x}
 async function llmJson(sys,user){let err;
@@ -548,7 +548,7 @@ const AG_DEL=AG_SYS.replace('Para gönderme, satın alma, silme, hesap veya şif
 async function agent(goal,del){
   if(!goal)return'';const J=PL('JarvisView');
   try{const L=await J.locked();if(L&&L.locked)return'Telefon kilitli. Kilidi sen aç, sonra yapayım.'}catch(e){}
-  if(!await accOn())return'Bunun için erişilebilirlik iznini vermen lazım. Ayarlarda "erişilebilirlik izni ver" düğmesine bas ve Jarvis\'i aç.';
+  if(!await accOn())return accWhy;
   if(agentOn)return'Zaten bir işle uğraşıyorum.';agentOn=true;try{await J.keep({on:true})}catch(e){}
   const hist=[];let res='';
   try{for(let i=0;i<16;i++){
@@ -577,7 +577,7 @@ async function toggleTile(l){const tl=TILES.find(x=>x[0].test(l));if(!tl||!await
 async function readNotifs(){const J=PL('JarvisView');try{const r=await J.notifs();if(!r.on)return'Bildirim erişimi kapalı. Ayarlarda "bildirim erişimi ver" düğmesine bas.';const L=JSON.parse(r.list||'[]');if(!L.length)return'Yeni bildirim yok.';return L.length+' bildirim var. '+L.slice(0,8).map((n,i)=>(i+1)+') '+n.app+(n.title?', '+n.title:'')+(n.text?': '+n.text:'')).join('. ')}catch(e){return'Bildirimlere bakamadım.'}}
 function emergency(n){const x=String(n).trim().toLowerCase();if(/^(112|acil|ambulans)/.test(x))return['112 acil çağrı','112'];if(/^(155|polis)/.test(x))return['155 polis','155'];if(/^(110|itfaiye)/.test(x))return['110 itfaiye','110'];if(/^(jandarma|156)/.test(x))return['156 jandarma','156'];return null}
 let lastVis=null;
-async function lookScreen(q){const J=PL('JarvisView');if(!await accOn())return'Ekranı görmem için erişilebilirlik iznini vermen lazım.';
+async function lookScreen(q){const J=PL('JarvisView');if(!await accOn())return accWhy;
   try{const mini=document.body.classList.contains('mini');if(mini)$('mini').style.visibility='hidden';await sleep(250);let r;try{r=await J.shot()}finally{if(mini)$('mini').style.visibility=''}
     const x=await ask('Bu telefon ekran görüntüsünü Türkçe, en fazla 3 kısa cümleyle yorumla. Soru: '+(q||'Ekranda ne var?')+'\nSon satıra tam olarak şunu ekle: ARAMA: <bu görüntü için Google araması, 2-6 kelime>',[],r.img,false);
     const m=x.text.match(/ARAMA:\s*(.+)$/im);lastVis=m?m[1].trim():null;return x.text.replace(/ARAMA:.*$/im,'').trim()+(lastVis?' İstersen Google\'da arat de.':'')}
