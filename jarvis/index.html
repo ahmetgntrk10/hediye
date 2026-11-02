@@ -303,7 +303,7 @@ $('bDx').onclick=async()=>{const o=$('dx');const out=[];const P=()=>{o.textConte
   await T('Sunucu beyni (Gemini)',async()=>{const r=await srvCall('/chat',{text:'Sadece "tamam" de.',history:[]});return String(r.reply).slice(0,80)});
   await T('Telefondaki Gemini',async()=>{const r=await ask('Sadece "tamam" de.',[]);return r.engine+' · '+r.model});
   if(NATIVE){const J2=PL('JarvisView');await T('Ses motoru',async()=>{const i=await J2.ttsInfo();let sp='konuştu';try{await J2.ttsSpeak({text:'Ses testi. Jarvis konuşuyor.'})}catch(e){sp='HATA: '+(e&&e.message||e)}return JSON.stringify(i)+' · '+sp+' (trLang: 0/1 = var, -1 = ses dosyası yok, -2 = Türkçe yok)'})}
-  if(NATIVE){await T('Telefon sesi',async()=>{const r=await PL('JarvisView').ttsInfo();let sp='';try{await PL('JarvisView').ttsSpeak({text:'Ses testi.'});sp=' · söyledi'}catch(e){sp=' · SÖYLEYEMEDİ: '+(e&&e.message||e)}return JSON.stringify(r)+sp})}
+  if(NATIVE){await T('Telefon sesi',async()=>{const r=await PL('JarvisView').ttsDiag();return 'ses seviyesi '+r.vol+', zil modu '+r.ringer+', dil '+r.trAvail})}
   if(NATIVE){const J=PL('JarvisView');await T('Telefon eklentisi',async()=>{const r=await J.wakeState();return 'Erişilebilirlik: '+(await J.accState().then(x=>JSON.stringify(x)).catch(e=>'?'))})}
   if(NATIVE){await T('Hey asistan dinleyicisi',async()=>{const r=await PL('JarvisView').wakeState();return JSON.stringify(r)})}
   out.push('Bitti. Bu yazıların ekran görüntüsünü gönder.');P()};

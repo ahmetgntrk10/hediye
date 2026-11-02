@@ -610,7 +610,7 @@ jobs:
               });
             }
             @PluginMethod
-            public void ttsInfo(final PluginCall call) {
+            public void ttsDiag(final PluginCall call) {
               final JSObject r = new JSObject();
               try {
                 AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
