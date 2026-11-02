@@ -24,6 +24,8 @@ async function init() {
   await q(`create table if not exists notes(id serial primary key, text text not null, created_at timestamptz default now())`);
   await q(`create table if not exists reminders(id serial primary key, text text not null, due_at timestamptz not null, status text default 'pending', created_at timestamptz default now())`);
   await q(`alter table reminders add column if not exists pushed boolean default false`);
+  await q(`create table if not exists notifs(id serial primary key, app text, title text, text text, important boolean, reminded boolean default false, handled boolean default false, created_at timestamptz default now())`);
+  await q(`create table if not exists kv(k text primary key, v text)`);
   await q(`create table if not exists chat_log(id serial primary key, role text, text text, created_at timestamptz default now())`);
 }
 
@@ -43,6 +45,9 @@ const TOOLS = [
   { name: 'watch_add', description: 'Bir web sayfasını/fiyatı izlemeye alır; sayfa değişince kullanıcıya bildirim gider. Kullanıcı bir ürün/sayfa değişince haber ver derse kullan. url tam adres olmalı; bilmiyorsan web_search ile bul.', parameters: { type: 'OBJECT', properties: { url: { type: 'STRING' }, title: { type: 'STRING' } }, required: ['url'] } },
   { name: 'watch_list', description: 'İzlenen sayfaların listesi.', parameters: { type: 'OBJECT', properties: {} } },
   { name: 'watch_remove', description: 'İzlenen bir sayfayı kaldırır (uuid ile, watch_list verir).', parameters: { type: 'OBJECT', properties: { uuid: { type: 'STRING' } }, required: ['uuid'] } },
+  { name: 'notifs_recent', description: 'Telefondan kaydedilen son bildirimleri/mesajları listeler (WhatsApp, SMS vb.). Kullanıcı "kim ne yazdı", "cevaplamadığım mesaj var mı", "ablam yazdı mı" derse kullan. only_unhandled=true sadece cevaplanmamış önemlileri verir.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' }, hours: { type: 'NUMBER' }, only_unhandled: { type: 'BOOLEAN' } } } },
+  { name: 'notif_handled', description: 'Kullanıcı bir kişiye/mesaja cevap verdiğini ya da önemsemediğini söylerse o bildirimleri kapatır (kişi adı ya da metin ile).', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
+  { name: 'morning_brief', description: 'Sabah özeti hazırlar: hava, hatırlatıcılar, cevapsız önemli mesajlar, haberler. Kullanıcı "sabah özeti", "günün özeti" derse çağır.', parameters: { type: 'OBJECT', properties: {} } },
   { name: 'list_email_accounts', description: 'Kullanıcının e-posta gönderebileceği hesapların listesi.', parameters: { type: 'OBJECT', properties: {} } },
   { name: 'send_email', description: 'E-posta gönderme isteği hazırlar. Doğrudan göndermez; kullanıcı onayına sunar. account alanını kullanıcı açıkça söylemediyse ASLA tahmin etme, önce sor.', parameters: { type: 'OBJECT', properties: { account: { type: 'STRING', description: 'Gönderen hesap, listedekilerden biri' }, to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' } }, required: ['account', 'to', 'subject', 'body'] } }
 ];
@@ -187,6 +192,17 @@ async function runTool(name, args, ctx) {
   if (name === 'cancel_reminder') { await q(`update reminders set status='done' where id=$1`, [+args.id || 0]); return { tamam: true }; }
   if (name === 'weather') return await weather(String(args.city || ''));
   if (name === 'watch_add' || name === 'watch_list' || name === 'watch_remove') return await watchTool(name, args);
+  if (name === 'notifs_recent') {
+    const hrs = Math.min(168, Math.max(1, +args.hours || 24)), like = '%' + String(args.query || '').slice(0, 60) + '%';
+    const r = await q(`select id,app,title,text,important,handled,created_at from notifs where created_at > now() - ($1 || ' hours')::interval and (title ilike $2 or text ilike $2 or app ilike $2)${args.only_unhandled ? ' and important is true and handled is false' : ''} order by id desc limit 20`, [String(hrs), like]);
+    return { bildirimler: r.rows.map(x => `[${trTime(x.created_at)}] ${x.app} · ${x.title}: ${x.text}${x.important ? ' (önemli)' : ''}${x.handled ? ' (kapatıldı)' : ''}`) };
+  }
+  if (name === 'notif_handled') {
+    const like = '%' + String(args.query || '').slice(0, 60) + '%';
+    const r = await q(`update notifs set handled=true where handled is false and (title ilike $1 or text ilike $1) returning id`, [like]);
+    return { tamam: true, kapanan: r.rowCount };
+  }
+  if (name === 'morning_brief') return { not: 'Şimdi hava (şehri hafızadan bul), bugünkü hatırlatıcılar, cevapsız önemli mesajlar ve 2 önemli haberi araçlarla topla; en fazla 4 kısa cümleyle özetle (bu özet için 2 cümle sınırı geçerli değil).' };
   if (name === 'web_search') return await webSearch(String(args.query || ''));
   if (name === 'recall_history') {
     const like = '%' + String(args.query || '').slice(0, 60) + '%';
@@ -239,6 +255,8 @@ Kurallar:
 - Önceki konuşmayı dikkate al: kısa sorular bir önceki konuyla ilgilidir.
 - Kalıp komut bekleme: kullanıcı serbest konuşur, ne istediğini sen çıkar. Söylediğine bağlı yardımcı işler varsa (ör. "yarın Ankara'ya gidiyorum" → hava durumu, sabah alarmı, hatırlatma) küçük ve geri alınabilir olanları kendin yap, mesaj/mail/silme gibi riskli olanları sadece öner ve onay iste. Hepsini tek kısa cevapta söyle.
 - Not almak için add_note, hatırlatmak için add_reminder, hava için weather kullan. Hatırlatıcıda saati ŞİMDİ bilgisine göre hesapla.
+- Kullanıcı yaşadığı şehri söylerse remember ile tam olarak 'Şehir: <şehir>' biçiminde kaydet.
+- Kullanıcı bir mesaja cevap verdiğini söylerse notif_handled çağır.
 - Kullanıcı hakkında yeni kalıcı bilgi öğrenirsen (kişi kim, tercih, alışkanlık, hangi hesap) remember ile kaydet; bu şekilde onu zamanla tanırsın.`;
 
 async function geminiLoop(text, history, ctx) {
@@ -327,7 +345,7 @@ const auth = (req, res, next) => {
   if (h === 'Bearer ' + TOKEN) return next();
   res.status(401).json({ error: 'yetkisiz' });
 };
-app.get('/health', (req, res) => res.json({ ok: true, ver: 'g7', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
+app.get('/health', (req, res) => res.json({ ok: true, ver: 'g8', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
 
 app.post('/chat', auth, async (req, res) => {
   try {
@@ -363,8 +381,71 @@ app.get('/tasks', auth, async (req, res) => res.json((await q('select id,text,st
 app.get('/approvals', auth, async (req, res) => res.json((await q(`select id,kind,summary,payload,status,created_at from approvals where status='pending' order by id`)).rows));
 app.get('/reminders/due', auth, async (req, res) => res.json((await q(`select id,text,due_at from reminders where status='pending' and due_at <= now() order by due_at limit 10`)).rows));
 app.post('/reminders/:id/ack', auth, async (req, res) => { await q(`update reminders set status='done' where id=$1`, [+req.params.id]); res.json({ ok: true }); });
+app.post('/notifs', auth, async (req, res) => {
+  const items = Array.isArray(req.body.items) ? req.body.items.slice(0, 100) : [];
+  let n = 0;
+  for (const it of items) {
+    const app_ = String(it.app || '').slice(0, 60), title = String(it.title || '').slice(0, 120), text = String(it.text || '').slice(0, 500);
+    if (!title && !text) continue;
+    const d = await q(`select 1 from notifs where app=$1 and title=$2 and text=$3 and created_at > now() - interval '10 minutes' limit 1`, [app_, title, text]);
+    if (d.rows.length) continue;
+    await q('insert into notifs(app,title,text) values($1,$2,$3)', [app_, title, text]); n++;
+  }
+  res.json({ ok: true, n });
+});
 app.post('/approvals/:id', auth, async (req, res) => res.json(await decide(+req.params.id, !!req.body.approve)));
 
+const KEYWORDS = /(acil|hastane|kaza|ara beni|beni ara|önemli|polis|yangın|ambulans|bir şey oldu|nerdesin|neredesin|cevap ver|lütfen ara|sınav|toplantı)/i;
+async function homeCity() {
+  if (ENV.HOME_CITY) return ENV.HOME_CITY;
+  try { const r = await q(`select text from memories where text ilike 'Şehir:%' order by id desc limit 1`); return r.rows[0] ? r.rows[0].text.replace(/^Şehir:\s*/i, '').trim() : ''; } catch (e) { return ''; }
+}
+async function classifyWorker() {
+  try {
+    const r = await q(`select id,app,title,text from notifs where important is null order by id limit 10`);
+    if (!r.rows.length) return;
+    let imp = new Set();
+    let llmOk = false;
+    if (DEEP_KEY) {
+      try {
+        const mem = (await q('select text from memories order by id desc limit 15')).rows.map(x => x.text).join('; ');
+        const list = r.rows.map(x => `${x.id}) ${x.app} · ${x.title}: ${x.text}`).join('\n');
+        const resp = await fetch(`${DBASE}/chat/completions`, { method: 'POST', headers: { Authorization: 'Bearer ' + DEEP_KEY, 'content-type': 'application/json' }, body: JSON.stringify({ model: DEEP_MODEL, messages: [{ role: 'system', content: 'Kullanıcının telefon bildirimlerini sınıflandırıyorsun. Kullanıcı hakkında bildiklerin: ' + mem + '\nSadece JSON döndür: {"onemli":[id,...]}. Önemli: yakınlarından (aile, yakın arkadaş) gelen kişisel mesajlar, acil durum, arama/cevap isteği, randevu/sınav/toplantı, güvenlik ve para ile ilgili uyarılar. Önemsiz: reklam, grup sohbeti gürültüsü, oyun/sosyal medya bildirimleri, otomatik mesajlar.' }, { role: 'user', content: list }], response_format: { type: 'json_object' } }) });
+        if (resp.ok) { const j = await resp.json(); const o = JSON.parse(j.choices?.[0]?.message?.content || '{}'); (o.onemli || []).forEach(i => imp.add(+i)); llmOk = true; }
+      } catch (e) {}
+    }
+    for (const x of r.rows) {
+      const v = llmOk ? imp.has(x.id) : KEYWORDS.test(x.title + ' ' + x.text);
+      await q('update notifs set important=$2 where id=$1', [x.id, v]);
+      if (v) await push('Onemli', `${x.title}: ${x.text}`.slice(0, 200));
+    }
+  } catch (e) { console.error('classify', e.message); }
+}
+async function unansweredWorker() {
+  try {
+    const r = await q(`select id,title,text from notifs where important is true and handled is false and reminded is false and created_at < now() - interval '2 hours' and created_at > now() - interval '1 day' order by id limit 3`);
+    for (const x of r.rows) { await q('update notifs set reminded=true where id=$1', [x.id]); await push('Onemli', `${x.title} 2 saat once yazdi, cevaplamadin: ${x.text}`.slice(0, 200)); }
+  } catch (e) { console.error('unanswered', e.message); }
+}
+const kvGet = async k => (await q('select v from kv where k=$1', [k])).rows[0]?.v;
+const kvSet = async (k, v) => q('insert into kv(k,v) values($1,$2) on conflict(k) do update set v=excluded.v', [k, v]);
+async function scheduler() {
+  try {
+    const now = new Date(); const hm = now.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).slice(11, 16), day = now.toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).slice(0, 10);
+    const BT = ENV.BRIEF_TIME || '08:00';
+    if (BT !== 'off' && hm >= BT && hm < '11:00' && (await kvGet('brief_day')) !== day) {
+      await kvSet('brief_day', day);
+      const o = await think('Sabah özeti hazırla. Hava (şehri hafızadan bul, yoksa hava kısmını atla), bugünkü hatırlatıcılar, cevapsız önemli mesajlar, Türkiye ve dünyadan 2 önemli haber. En fazla 4 kısa cümle, bu özet için 2 cümle sınırı geçerli değil.', [], {});
+      await q('insert into chat_log(role,text) values($1,$2)', ['a', 'Sabah özeti: ' + o.reply]);
+      await push('Sabah ozeti', o.reply.slice(0, 600));
+    }
+    if (hm >= '20:00' && hm < '22:00' && (await kvGet('rain_day')) !== day) {
+      await kvSet('rain_day', day);
+      const city = await homeCity();
+      if (city) { const w = await weather(city); const p = w?.yarin?.yagis_ihtimali; if (p >= 60) await push('Hava', `Yarin ${city} icin yagmur ihtimali %${p}. Semsiye al.`); }
+    }
+  } catch (e) { console.error('scheduler', e.message); }
+}
 let busy = false;
 async function remindWorker() {
   if (!NTFY_URL || !NTFY_TOPIC) return;
@@ -393,3 +474,6 @@ const PORT = +ENV.PORT || 3000;
 app.listen(PORT, () => console.log('Jarvis sunucusu hazır :' + PORT));
 setInterval(worker, 5000);
 setInterval(remindWorker, 8000);
+setInterval(classifyWorker, 30000);
+setInterval(unansweredWorker, 600000);
+setInterval(scheduler, 60000);

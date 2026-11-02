@@ -223,7 +223,7 @@ async function local(t){
   m=l.match(/(.+?)\s+(ara|araştır)$/);
   if(m){const q=m[1].trim();if(q&&q.length>1){await googleOpen(q);return q+' aranıyor.'}}
   m=l.match(/^(.+?)\s+(aç|açar mısın|açsana)$/);if(m){const k=Object.keys(SITES).find(k=>m[1].includes(k));if(k){if(NATIVE){await openApp(k);return k+' açılıyor.'}openUrl(SITES[k],k);return k+' açılıyor.'}}
-  if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/.test(l))return null;
+  if(CAMRX.test(l))return null;
   return null;
 }
 /* ---------- LLM ---------- */
@@ -291,9 +291,10 @@ async function srvRoute(text){
     return await srvChat(text);
   }catch(e){if(/şifresi/.test(e.message))return e.message;queueTask(text);return 'Sunucuya ulaşamadım ('+e.message+'). İşi sıraya aldım, bağlanınca göndereceğim.'}
 }
-async function srvPoll(){if(!srvOn()||offline())return;try{await syncQueue();const rd=await srvCall('/reminders/due',null,true);for(const r of (rd||[])){await srvCall('/reminders/'+r.id+'/ack',{});const rm='Hatırlatma: '+r.text;log('j',rm);try{PL('JarvisView').minVol({pct:50})}catch(e){}if(!busy)say(rm)}const a=await srvCall('/approvals',null,true);const fresh=(a||[]).filter(x=>!srvSeen[x.id]);if(fresh.length){fresh.forEach(x=>srvSeen[x.id]=1);srvPend=true;const m='Onayını bekleyen iş var: '+fresh[0].summary+'. Yapayım mı? Evet ya da hayır de.';log('j',m);if(!MINI&&!busy)say(m)}
+function pushCfg(){try{if(NATIVE&&srvOn()&&PL('JarvisView')&&PL('JarvisView').srvCfg)PL('JarvisView').srvCfg({url:S.sU.replace(/\/+$/,''),token:S.sT})}catch(e){}}
+async function srvPoll(){pushCfg();if(!srvOn()||offline())return;try{await syncQueue();const rd=await srvCall('/reminders/due',null,true);for(const r of (rd||[])){await srvCall('/reminders/'+r.id+'/ack',{});const rm='Hatırlatma: '+r.text;log('j',rm);try{PL('JarvisView').minVol({pct:50})}catch(e){}if(!busy)say(rm)}const a=await srvCall('/approvals',null,true);const fresh=(a||[]).filter(x=>!srvSeen[x.id]);if(fresh.length){fresh.forEach(x=>srvSeen[x.id]=1);srvPend=true;const m='Onayını bekleyen iş var: '+fresh[0].summary+'. Yapayım mı? Evet ya da hayır de.';log('j',m);if(!MINI&&!busy)say(m)}
   const ts=await srvCall('/tasks',null,true);const dn=(ts||[]).filter(x=>x.status==='done'||x.status==='failed');const seen=store.get('tseen',null);if(seen===null){store.set('tseen',dn.map(x=>x.id))}else{const fr=dn.filter(x=>!seen.includes(x.id));if(fr.length){store.set('tseen',seen.concat(fr.map(x=>x.id)).slice(-200));const m='Arka plandaki işin bitti: '+String(fr[0].result||fr[0].text).slice(0,300);log('j',m);if(!MINI&&!busy)say(m)}}}catch(e){}}
-function srvBoot(){srvStat();setTimeout(resumeActs,3000);window.addEventListener('online',()=>{setTimeout(srvPoll,1500)});setTimeout(srvPoll,4000);setInterval(srvPoll,60000)}
+function srvBoot(){srvStat();pushCfg();setTimeout(resumeActs,3000);window.addEventListener('online',()=>{setTimeout(srvPoll,1500)});setTimeout(srvPoll,4000);setInterval(srvPoll,60000)}
 $('bDx').onclick=async()=>{const o=$('dx');const out=[];const P=()=>{o.textContent=out.join('\n')};
   const T=async(n,f)=>{out.push('… '+n);P();const i=out.length-1,t0=Date.now();try{const r=await f();out[i]='✓ '+n+' ('+Math.round((Date.now()-t0)/100)/10+'s) '+(r||'')}catch(e){out[i]='✗ '+n+': '+String(e&&e.message||e).slice(0,300)}P()};
   S.sU=$('sU').value.trim();S.sT=$('sT').value.trim();S.kG=$('kG').value.trim();S.kD=$('kD').value.trim();
@@ -321,10 +322,10 @@ async function run(text){
     if(r){log('j',r);hist.push({r:'u',t:text},{r:'a',t:r});if(srvOn()&&!offline())srvCall('/log',{u:text,a:r}).catch(()=>{});busy=false;await say(r);return}
     if(offline()&&NATIVE){if(srvOn()&&(WEBQ.test(text)||SRVRX.test(text)||MAILW.test(text)||TASKRX.test(text))){queueTask(text);clearInterval(iv);busy=false;hist.push({r:'u',t:text},{r:'a',t:'Kaydettim.'});const m='İnternet yok. Bu işi kaydettim, internet gelince ben demeden arka planda yapacağım. Önemli bir şey çıkarsa önce sana soracağım.';log('j',m);await say(m);return}
       clearInterval(iv);busy=false;const m2='İnternet yok, bunu şu an yapamıyorum. İnternetsiz sadece telefon işlerini yaparım.';log('j',m2);await say(m2);return}
-    {const sv=await srvRoute(text);if(sv!==null){hist.push({r:'u',t:text},{r:'a',t:sv});log('j',sv);clearInterval(iv);busy=false;await say(sv);return}}
-    let img=null;if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&camOn)img=grab();
-    if(/kamera(ya)? bak|ne görüyorsun|bu ne|şuna bak|önümde ne var/i.test(text)&&!img)throw new Error('Kamera kapalı.');
-    const a=await ask(text,hist.slice(-12),img,WEBQ.test(text));
+    if(!CAMRX.test(text)){const sv=await srvRoute(text);if(sv!==null){hist.push({r:'u',t:text},{r:'a',t:sv});log('j',sv);clearInterval(iv);busy=false;await say(sv);return}}
+    let img=null;if(CAMRX.test(text)){if(camOn)img=grab();else{try{img=await quickShot()}catch(e){throw new Error('Kamera açılamadı. Kamera izni var mı?')}}}
+    if(CAMRX.test(text)&&!img)throw new Error('Kamera kapalı.');
+    const a=await ask(img&&/oku/i.test(text)?text+' (Görüntüdeki yazıyı aynen oku, kısa tut.)':img?text+' (Görüntüye bakıp kısaca cevapla.)':text,hist.slice(-12),img,WEBQ.test(text));
     let txt=a.text;const acts=[];for(const am of [...txt.matchAll(/\[\[EYLEM\s*(\{[\s\S]*?\})\s*\]\]/g)]){txt=txt.replace(am[0],'').trim();try{acts.push(JSON.parse(am[1]))}catch(e){}}
     if(acts.length&&NATIVE){const rs=await runActs(acts);if(rs)txt=(txt?txt+' ':'')+rs}
     hist.push({r:'u',t:text},{r:'a',t:txt});log('j',txt);log('s',a.engine+' · '+a.model);busy=false;await say(txt);
@@ -341,6 +342,8 @@ async function loadMP(){
   throw err}
 let loopOn=false;
 function stopCam(){try{vid.srcObject&&vid.srcObject.getTracks().forEach(t=>t.stop())}catch(e){}vid.srcObject=null;camOn=false;$('cam').classList.remove('on');hstat('kamera kapalı')}
+const CAMRX=/(kamera(ya)? bak|ne görüyorsun|bu ne\b|şuna bak|önümde ne var|yazıyı oku|bunu oku|etiketi oku|bu neye benziyor|şu ne\b)/i;
+async function quickShot(){const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1024},height:{ideal:768}},audio:false});try{const v=document.createElement('video');v.muted=true;v.playsInline=true;v.srcObject=st;await v.play();await sleep(1000);const c=document.createElement('canvas'),w=v.videoWidth,h=v.videoHeight,k=Math.min(1,800/Math.max(w,h));c.width=w*k;c.height=h*k;c.getContext('2d').drawImage(v,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.85).split(',')[1]}finally{st.getTracks().forEach(t=>t.stop())}}
 async function startCam(){
   if(camOn)return;hstat('kamera açılıyor…');
   try{const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});vid.srcObject=st;await vid.play();camOn=true;$('cam').classList.toggle('on',S.prev);}

@@ -610,6 +610,11 @@ jobs:
               });
             }
             @PluginMethod
+            public void srvCfg(PluginCall call) {
+              getContext().getSharedPreferences("jarvis", Context.MODE_PRIVATE).edit().putString("srvUrl", call.getString("url", "")).putString("srvTok", call.getString("token", "")).apply();
+              call.resolve();
+            }
+            @PluginMethod
             public void minVol(PluginCall call) {
               try {
                 AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
@@ -1330,6 +1335,45 @@ jobs:
               inst = null;
               try { if (tts != null) tts.shutdown(); } catch (Exception e) {}
             }
+            private static final java.util.ArrayList<org.json.JSONObject> LOGQ = new java.util.ArrayList<org.json.JSONObject>();
+            private void logNotif(StatusBarNotification sbn, SharedPreferences sp) {
+              try {
+                final String url = sp.getString("srvUrl", ""), tok = sp.getString("srvTok", "");
+                if (url.length() < 8 || tok.length() < 8) return;
+                String pkg = sbn.getPackageName();
+                if (pkg.equals(getPackageName()) || pkg.equals("io.heckel.ntfy")) return;
+                Notification n = sbn.getNotification();
+                if (n == null || (n.flags & Notification.FLAG_ONGOING_EVENT) != 0 || (n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return;
+                boolean imp = Notification.CATEGORY_MESSAGE.equals(n.category) || "missed_call".equals(n.category);
+                for (String p : MSG) if (p.equals(pkg)) imp = true;
+                if (!imp) return;
+                Bundle e = n.extras;
+                CharSequence t = e.getCharSequence(Notification.EXTRA_TITLE);
+                CharSequence x = e.getCharSequence(Notification.EXTRA_TEXT);
+                if (t == null && x == null) return;
+                String app = pkg;
+                try { PackageManager pm = getPackageManager(); app = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0))); } catch (Exception e2) {}
+                org.json.JSONObject o = new org.json.JSONObject();
+                o.put("app", app); o.put("title", t == null ? "" : t.toString()); o.put("text", x == null ? "" : x.toString());
+                synchronized (LOGQ) { LOGQ.add(o); while (LOGQ.size() > 200) LOGQ.remove(0); }
+                new Thread(new Runnable() { public void run() { flushLog(url, tok); } }).start();
+              } catch (Exception ex) {}
+            }
+            private static void flushLog(String url, String tok) {
+              try {
+                org.json.JSONArray arr = new org.json.JSONArray();
+                int cnt;
+                synchronized (LOGQ) { cnt = LOGQ.size(); for (int i = 0; i < cnt; i++) arr.put(LOGQ.get(i)); }
+                if (cnt == 0) return;
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url.replaceAll("/+$", "") + "/notifs").openConnection();
+                c.setConnectTimeout(8000); c.setReadTimeout(10000); c.setRequestMethod("POST"); c.setDoOutput(true);
+                c.setRequestProperty("Content-Type", "application/json"); c.setRequestProperty("Authorization", "Bearer " + tok);
+                org.json.JSONObject body = new org.json.JSONObject(); body.put("items", arr);
+                java.io.OutputStream os = c.getOutputStream(); os.write(body.toString().getBytes("UTF-8")); os.close();
+                int code = c.getResponseCode(); c.disconnect();
+                if (code == 200) synchronized (LOGQ) { for (int i = 0; i < cnt && !LOGQ.isEmpty(); i++) LOGQ.remove(0); }
+              } catch (Exception ex) {}
+            }
             private boolean headsetOn() {
               try {
                 AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -1344,14 +1388,15 @@ jobs:
             public void onNotificationPosted(StatusBarNotification sbn) {
               try {
                 SharedPreferences sp = getSharedPreferences("jarvis", Context.MODE_PRIVATE);
+                logNotif(sbn, sp);
                 if ("io.heckel.ntfy".equals(sbn.getPackageName()) && ready && sbn.getNotification() != null) {
                   Bundle b0 = sbn.getNotification().extras;
                   CharSequence t0 = b0.getCharSequence(Notification.EXTRA_TITLE);
                   CharSequence x0 = b0.getCharSequence(Notification.EXTRA_TEXT);
-                  if (t0 != null && x0 != null && t0.toString().toLowerCase().contains("atirlatma") && seen.add(sbn.getKey() + "|" + x0)) {
+                  if (t0 != null && x0 != null && (t0.toString().toLowerCase().contains("atirlatma") || t0.toString().toLowerCase().contains("nemli")) && seen.add(sbn.getKey() + "|" + x0)) {
                     AudioManager am0 = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
                     try { int mx0 = am0.getStreamMaxVolume(AudioManager.STREAM_MUSIC); if (am0.getStreamVolume(AudioManager.STREAM_MUSIC) < mx0 / 2) am0.setStreamVolume(AudioManager.STREAM_MUSIC, mx0 / 2, 0); } catch (Exception e0) {}
-                    if (am0.getMode() == AudioManager.MODE_NORMAL) tts.speak("Hatırlatma: " + x0, TextToSpeech.QUEUE_ADD, null, "r" + System.nanoTime());
+                    if (am0.getMode() == AudioManager.MODE_NORMAL) tts.speak((t0.toString().toLowerCase().contains("atirlatma") ? "Hatırlatma: " : "Önemli mesaj: ") + x0, TextToSpeech.QUEUE_ADD, null, "r" + System.nanoTime());
                   }
                   return;
                 }
