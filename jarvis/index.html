@@ -280,7 +280,7 @@ async function resumeActs(){if(actsRunning)return;const r=store.get('rest',[]);i
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(resumeActs,1200)});
 function queueTask(t){const q=store.get('queue',[]);q.push(t);store.set('queue',q);srvStat()}
 async function syncQueue(){const q=store.get('queue',[]);if(!q.length||!srvOn()||offline())return;try{await srvCall('/tasks',{tasks:q});store.set('queue',[]);srvStat();log('s',q.length+' bekleyen görev sunucuya gönderildi, başlıyor.');return q.length}catch(e){log('s','Görevler gönderilemedi: '+e.message)}}
-async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);let r=o.reply||'';if(o.ms)log('s','sunucu '+(o.ms/1000).toFixed(1)+'s');if(NATIVE&&o.actions&&o.actions.length){const rs=await runActs(o.actions);if(rs&&(!r||/Yapamadım|yok|izin|Hangisi|Birden fazla/i.test(rs)))r+=(r?' ':'')+rs}return r||'Tamam.'}
+async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);let r=o.reply||'';if(o.ms)log('s','sunucu '+(o.ms/1000).toFixed(1)+'s'+(o.engine?' · '+o.engine:'')+(o.hata?' · uyarı: '+o.hata:''));if(NATIVE&&o.actions&&o.actions.length){const rs=await runActs(o.actions);if(rs&&(!r||/Yapamadım|yok|izin|Hangisi|Birden fazla/i.test(rs)))r+=(r?' ':'')+rs}return r||'Tamam.'}
 async function srvRoute(text){
   if(!srvOn())return MAILW.test(text)?'Mail göndermek için sunucu bağlı olmalı. Ayarlardan sunucu şifresini gir.':null;
   const isTask=TASKRX.test(text),isSrv=MAILW.test(text)||(SRVRX.test(text)&&!/(aç|açsana|açar mısın|başlat)\s*$/.test(text.trim()))||(srvPend&&YESRX.test(text.trim()));
@@ -301,7 +301,7 @@ $('bDx').onclick=async()=>{const o=$('dx');const out=[];const P=()=>{o.textConte
   out.push('İnternet: '+(offline()?'YOK':'var')+' · Uygulama: '+(NATIVE?'telefon':'tarayıcı')+' · HTTP eklentisi: '+(PL('CapacitorHttp')?'var':'yok'));P();
   await T('Sunucu açık mı',async()=>{const r=await srvCall('/health',null,true);return JSON.stringify(r)});
   await T('Şifre doğru mu',async()=>{const r=await srvCall('/approvals',null,true);return 'tamam, bekleyen onay: '+(r||[]).length});
-  await T('Sunucu beyni (Gemini)',async()=>{const r=await srvCall('/chat',{text:'Sadece "tamam" de.',history:[]});return String(r.reply).slice(0,80)});
+  await T('Sunucu beyni (Gemini)',async()=>{const r=await srvCall('/chat',{text:'Sadece "tamam" de.',history:[]});return String(r.reply).slice(0,40)+' · '+(r.engine||'?')+(r.hata?' · UYARI: '+r.hata:'')});
   await T('Telefondaki Gemini',async()=>{const r=await ask('Sadece "tamam" de.',[]);return r.engine+' · '+r.model});
   if(NATIVE){const J2=PL('JarvisView');await T('Ses motoru',async()=>{const i=await J2.ttsInfo();let sp='konuştu';try{await J2.ttsSpeak({text:'Ses testi. Jarvis konuşuyor.'})}catch(e){sp='HATA: '+(e&&e.message||e)}return JSON.stringify(i)+' · '+sp+' (trLang: 0/1 = var, -1 = ses dosyası yok, -2 = Türkçe yok)'})}
   if(NATIVE){await T('Telefon sesi',async()=>{const r=await PL('JarvisView').ttsDiag();return 'ses seviyesi '+r.vol+', zil modu '+r.ringer+', dil '+r.trAvail})}

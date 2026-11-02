@@ -12,6 +12,12 @@ const N8N_URL = ENV.N8N_WEBHOOK_URL || '';
 const N8N_SECRET = ENV.N8N_SECRET || '';
 const GBASE = ENV.GEMINI_BASE || 'https://generativelanguage.googleapis.com/v1beta';
 const DBASE = ENV.DEEPSEEK_BASE || 'https://api.deepseek.com';
+const ANTH_KEY = ENV.ANTHROPIC_API_KEY || '';
+const ANTH_MODEL = ENV.ANTHROPIC_MODEL || 'claude-haiku-5-5';
+const ANTH_BASE = ENV.ANTHROPIC_BASE || 'https://api.anthropic.com';
+const OAI_KEY = ENV.OPENAI_API_KEY || '';
+const OAI_MODEL = ENV.OPENAI_MODEL || 'gpt-6-luna';
+const OAI_BASE = ENV.OPENAI_BASE || 'https://api.openai.com/v1';
 const DEEP_MODEL = ENV.DEEPSEEK_MODEL || 'deepseek-chat';
 
 const pool = globalThis.__POOL || new pg.Pool({ connectionString: ENV.DATABASE_URL });
@@ -283,20 +289,43 @@ async function geminiLoop(text, history, ctx) {
 }
 
 const lowerTypes = o => Array.isArray(o) ? o.map(lowerTypes) : (o && typeof o === 'object') ? Object.fromEntries(Object.entries(o).map(([k, v]) => [k, k === 'type' && typeof v === 'string' ? v.toLowerCase() : lowerTypes(v)])) : o;
-async function deepLoop(text, history, ctx) {
+async function oaiLoop(text, history, ctx, base, key, model, label) {
   const tools = TOOLS.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: lowerTypes(t.parameters) } }));
   const msgs = [{ role: 'system', content: SYS + (ctx.mem ? '\nHafıza:\n' + ctx.mem : '') }, ...history.filter(h => h && h.t).map(h => ({ role: h.r === 'u' ? 'user' : 'assistant', content: h.t })), { role: 'user', content: text }];
   for (let step = 0; step < 6; step++) {
-    const r = await fetch(`${DBASE}/chat/completions`, { method: 'POST', headers: { Authorization: 'Bearer ' + DEEP_KEY, 'content-type': 'application/json' }, body: JSON.stringify({ model: DEEP_MODEL, messages: msgs, tools }) });
-    if (!r.ok) throw new Error('DeepSeek ' + r.status + ' ' + (await r.text()).slice(0, 120));
+    const r = await fetch(`${base}/chat/completions`, { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: msgs, tools }) });
+    if (!r.ok) throw new Error(label + ' ' + r.status + ' ' + (await r.text()).slice(0, 120));
     const m = (await r.json()).choices?.[0]?.message;
-    if (!m) throw new Error('DeepSeek boş cevap');
-    if (!m.tool_calls || !m.tool_calls.length) return (m.content || '').trim() || 'Bir şey diyemedim.';
+    if (!m) throw new Error(label + ' boş cevap');
+    if (!m.tool_calls || !m.tool_calls.length) { ctx.engine = label + ' · ' + model; return (m.content || '').trim() || 'Bir şey diyemedim.'; }
     msgs.push({ role: 'assistant', content: m.content || '', tool_calls: m.tool_calls });
     for (const c of m.tool_calls) {
       let out; try { ctx.used = true; out = await runTool(c.function.name, JSON.parse(c.function.arguments || '{}'), ctx); } catch (e) { out = { hata: String(e.message || e) }; }
       msgs.push({ role: 'tool', tool_call_id: c.id, content: JSON.stringify(out) });
     }
+  }
+  return 'İşi bitiremedim, çok adım gerekti.';
+}
+const deepLoop = (text, history, ctx) => oaiLoop(text, history, ctx, DBASE, DEEP_KEY, DEEP_MODEL, 'DeepSeek');
+async function claudeLoop(text, history, ctx) {
+  const tools = TOOLS.map(t => ({ name: t.name, description: t.description, input_schema: lowerTypes(t.parameters) }));
+  const msgs = [...history.filter(h => h && h.t).map(h => ({ role: h.r === 'u' ? 'user' : 'assistant', content: h.t })), { role: 'user', content: text }];
+  // Anthropic: ilk mesaj user olmali, roller sirali olmali
+  const fixed = []; for (const m of msgs) { const last = fixed[fixed.length - 1]; if (last && last.role === m.role) last.content += '\n' + m.content; else fixed.push({ ...m }); }
+  while (fixed.length && fixed[0].role !== 'user') fixed.shift();
+  for (let step = 0; step < 6; step++) {
+    const r = await fetch(`${ANTH_BASE}/v1/messages`, { method: 'POST', headers: { 'x-api-key': ANTH_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' }, body: JSON.stringify({ model: ANTH_MODEL, max_tokens: 1024, system: SYS + (ctx.mem ? '\nHafıza:\n' + ctx.mem : ''), messages: fixed, tools }) });
+    if (!r.ok) throw new Error('Claude ' + r.status + ' ' + (await r.text()).slice(0, 120));
+    const j = await r.json();
+    const uses = (j.content || []).filter(b => b.type === 'tool_use');
+    if (!uses.length) { ctx.engine = 'Claude · ' + ANTH_MODEL; return (j.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim() || 'Bir şey diyemedim.'; }
+    fixed.push({ role: 'assistant', content: j.content });
+    const results = [];
+    for (const u of uses) {
+      let out; try { ctx.used = true; out = await runTool(u.name, u.input || {}, ctx); } catch (e) { out = { hata: String(e.message || e) }; }
+      results.push({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(out) });
+    }
+    fixed.push({ role: 'user', content: results });
   }
   return 'İşi bitiremedim, çok adım gerekti.';
 }
@@ -316,11 +345,16 @@ async function think(text, history, opts = {}) {
   try { const hp = await q(`select id,text,due_at from reminders where status='pending' order by due_at limit 10`); if (hp.rows.length) ctx.mem += '\nBEKLEYEN HATIRLATICILAR:\n' + hp.rows.map(x => `#${x.id} ${trTime(x.due_at)}: ${x.text}`).join('\n'); } catch (e) {}
   ctx.mem = 'ŞİMDİ (Türkiye saati): ' + new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).slice(0, 16).replace(' ', 'T') + ' (' + trTime(new Date()) + ')\n' + ctx.mem;
   let reply, err = '';
-  if (DEEP_KEY) { try { reply = await deepLoop(text, history, ctx); } catch (e) { err = String(e.message || e); } }
-  if (reply === undefined && !ctx.used && GEMINI_KEY) { try { reply = await geminiLoop(text, history, ctx); } catch (e) { err += ' | ' + String(e.message || e); } }
+  const sira = [];
+  if (ANTH_KEY) sira.push(() => claudeLoop(text, history, ctx));
+  if (OAI_KEY) sira.push(() => oaiLoop(text, history, ctx, OAI_BASE, OAI_KEY, OAI_MODEL, 'OpenAI'));
+  if (DEEP_KEY) sira.push(() => deepLoop(text, history, ctx));
+  for (const f of sira) { if (reply !== undefined || ctx.used) break; try { reply = await f(); } catch (e) { err += (err ? ' | ' : '') + String(e.message || e); } }
+  if (reply === undefined && !ctx.used && GEMINI_KEY) { try { reply = await geminiLoop(text, history, ctx); ctx.engine = 'Gemini'; } catch (e) { err += ' | ' + String(e.message || e); } }
   if (reply === undefined && !ctx.used && DEEP_KEY) { try { reply = await deepFallback(text, history); } catch (e) { err += ' | ' + String(e.message || e); } }
   if (reply === undefined) reply = 'Beynime ulaşamadım: ' + err.slice(0, 120);
-  return { reply, approvals: ctx.approvals, actions: ctx.actions };
+  if (err) console.error('beyin hatasi:', err.slice(0, 300));
+  return { reply, approvals: ctx.approvals, actions: ctx.actions, engine: ctx.engine || '', hata: err ? err.slice(0, 160) : '' };
 }
 
 /* ---------- onay ---------- */
@@ -345,7 +379,7 @@ const auth = (req, res, next) => {
   if (h === 'Bearer ' + TOKEN) return next();
   res.status(401).json({ error: 'yetkisiz' });
 };
-app.get('/health', (req, res) => res.json({ ok: true, ver: 'g8', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
+app.get('/health', (req, res) => res.json({ ok: true, ver: 'g9', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, claude: !!ANTH_KEY, openai: !!OAI_KEY, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
 
 app.post('/chat', auth, async (req, res) => {
   try {
