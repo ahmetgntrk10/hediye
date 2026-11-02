@@ -35,15 +35,45 @@ const TOOLS = [
   { name: 'send_email', description: 'E-posta gönderme isteği hazırlar. Doğrudan göndermez; kullanıcı onayına sunar. account alanını kullanıcı açıkça söylemediyse ASLA tahmin etme, önce sor.', parameters: { type: 'OBJECT', properties: { account: { type: 'STRING', description: 'Gönderen hesap, listedekilerden biri' }, to: { type: 'STRING' }, subject: { type: 'STRING' }, body: { type: 'STRING' } }, required: ['account', 'to', 'subject', 'body'] } }
 ];
 
-async function webSearch(query) {
-  if (!GEMINI_KEY) return { hata: 'Gemini anahtarı yok' };
+const TAVILY_KEY = process.env.TAVILY_API_KEY || '';
+async function searchTavily(query) {
+  const r = await fetch('https://api.tavily.com/search', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + TAVILY_KEY }, body: JSON.stringify({ query, max_results: 5, include_answer: true }) });
+  if (!r.ok) throw new Error('tavily ' + r.status);
+  const j = await r.json();
+  return (j.answer ? j.answer + '\n' : '') + (j.results || []).map(x => x.title + ': ' + String(x.content || '').slice(0, 300)).join('\n');
+}
+async function searchGemini(query) {
+  if (!GEMINI_KEY) throw new Error('anahtar yok');
   const r = await fetch(`${GBASE}/models/${GEMINI_MODEL}:generateContent`, {
     method: 'POST', headers: { 'x-goog-api-key': GEMINI_KEY, 'content-type': 'application/json' },
     body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: query + '\n\nKısa ve net yanıtla, kaynak adlarını yaz.' }] }], tools: [{ google_search: {} }] })
   });
-  if (!r.ok) return { hata: 'arama başarısız ' + r.status };
+  if (!r.ok) throw new Error('gemini ' + r.status);
   const j = await r.json();
-  return { sonuc: (j.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim() };
+  const t = (j.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim();
+  if (!t) throw new Error('bos');
+  return t;
+}
+const untag = x => String(x || '').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/\s+/g, ' ').trim();
+async function searchDDG(query) {
+  const r = await fetch('https://html.duckduckgo.com/html/?kl=tr-tr&q=' + encodeURIComponent(query), { headers: { 'user-agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36', 'accept-language': 'tr-TR,tr;q=0.9' } });
+  if (!r.ok) throw new Error('ddg ' + r.status);
+  const h = await r.text();
+  const out = [];
+  const re = /class="result__a"[^>]*>([\s\S]*?)<\/a>[\s\S]*?class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+  let m; while ((m = re.exec(h)) && out.length < 5) out.push(untag(m[1]) + ': ' + untag(m[2]).slice(0, 300));
+  if (!out.length) throw new Error('ddg bos');
+  return out.join('\n');
+}
+async function webSearch(query) {
+  const hatalar = [];
+  const yollar = [];
+  if (TAVILY_KEY) yollar.push(searchTavily);
+  yollar.push(searchGemini, searchDDG);
+  for (const f of yollar) {
+    try { return { sonuc: await f(query) }; } catch (e) { hatalar.push(String(e.message || e)); }
+  }
+  return { hata: 'arama yapılamadı: ' + hatalar.join(', ') };
 }
 
 const fmtLog = x => { const d = new Date(x.created_at); const t = d.toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); return `[${t}] ${x.role === 'u' ? 'Kullanıcı' : x.role === 'a' ? 'Jarvis' : 'Yapılan iş'}: ${x.text}`; };
