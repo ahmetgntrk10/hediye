@@ -1287,6 +1287,16 @@ jobs:
             public void onNotificationPosted(StatusBarNotification sbn) {
               try {
                 SharedPreferences sp = getSharedPreferences("jarvis", Context.MODE_PRIVATE);
+                if ("io.heckel.ntfy".equals(sbn.getPackageName()) && ready && sbn.getNotification() != null) {
+                  Bundle b0 = sbn.getNotification().extras;
+                  CharSequence t0 = b0.getCharSequence(Notification.EXTRA_TITLE);
+                  CharSequence x0 = b0.getCharSequence(Notification.EXTRA_TEXT);
+                  if (t0 != null && x0 != null && t0.toString().toLowerCase().contains("atirlatma") && seen.add(sbn.getKey() + "|" + x0)) {
+                    AudioManager am0 = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                    if (am0.getMode() == AudioManager.MODE_NORMAL) tts.speak("Hatırlatma: " + x0, TextToSpeech.QUEUE_ADD, null, "r" + System.nanoTime());
+                  }
+                  return;
+                }
                 if (!sp.getBoolean("readNotif", false) || !ready) return;
                 Notification n = sbn.getNotification();
                 if (n == null || sbn.getPackageName().equals(getPackageName())) return;

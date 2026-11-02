@@ -80,7 +80,7 @@ const NTFY_TOKEN = process.env.NTFY_TOKEN || '';
 async function push(title, text) {
   if (!NTFY_URL || !NTFY_TOPIC) return false;
   try {
-    const h = { Title: encodeURIComponent(title), Priority: 'high', Tags: 'bell' };
+    const h = { Title: 'Hatirlatma', Priority: 'high', Tags: 'bell' };
     if (NTFY_TOKEN) h.Authorization = 'Bearer ' + NTFY_TOKEN;
     const r = await fetch(NTFY_URL + '/' + encodeURIComponent(NTFY_TOPIC), { method: 'POST', headers: h, body: text });
     return r.ok;
