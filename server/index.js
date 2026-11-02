@@ -73,12 +73,37 @@ async function searchDDG(query) {
   if (!out.length) throw new Error('ddg bos');
   return out.join('\n');
 }
+const SERPER_KEY = process.env.SERPER_API_KEY || '';
+const SEARX_URL = (process.env.SEARXNG_URL || '').replace(/\/$/, '');
+async function searchSerper(query) {
+  const r = await fetch('https://google.serper.dev/search', { method: 'POST', headers: { 'x-api-key': SERPER_KEY, 'content-type': 'application/json' }, body: JSON.stringify({ q: query, gl: 'tr', hl: 'tr', num: 6 }) });
+  if (!r.ok) throw new Error('serper ' + r.status);
+  const j = await r.json();
+  const out = [];
+  if (j.answerBox) out.push(String(j.answerBox.answer || j.answerBox.snippet || '').slice(0, 300));
+  for (const x of (j.organic || []).slice(0, 5)) out.push(x.title + ': ' + String(x.snippet || '').slice(0, 300));
+  const t = out.filter(Boolean).join('\n'); if (!t) throw new Error('serper bos'); return t;
+}
+async function searchSearx(query) {
+  const r = await fetch(SEARX_URL + '/search?format=json&language=tr&q=' + encodeURIComponent(query));
+  if (!r.ok) throw new Error('searxng ' + r.status);
+  const j = await r.json();
+  const t = (j.results || []).slice(0, 6).map(x => x.title + ': ' + String(x.content || '').slice(0, 300)).join('\n');
+  if (!t) throw new Error('searxng bos'); return t;
+}
 async function webSearch(query) {
   const hatalar = [];
-  const yollar = [];
-  if (TAVILY_KEY) yollar.push(searchTavily);
-  yollar.push(searchGemini, searchDDG);
-  for (const f of yollar) {
+  const ana = [];
+  if (TAVILY_KEY) ana.push(['Tavily', searchTavily]);
+  if (SERPER_KEY) ana.push(['Google', searchSerper]);
+  if (SEARX_URL) ana.push(['SearXNG', searchSearx]);
+  if (ana.length) {
+    const rs = await Promise.allSettled(ana.map(([, f]) => f(query)));
+    const ok = [];
+    rs.forEach((r, i) => { if (r.status === 'fulfilled') ok.push(`[${ana[i][0]}]\n${r.value}`); else hatalar.push(ana[i][0] + ': ' + (r.reason && r.reason.message)); });
+    if (ok.length) return { sonuc: ok.join('\n\n'), not: ok.length > 1 ? 'Birden çok kaynak var, birbirini doğrulayanı söyle.' : '' };
+  }
+  for (const f of [searchGemini, searchDDG]) {
     try { return { sonuc: await f(query) }; } catch (e) { hatalar.push(String(e.message || e)); }
   }
   return { hata: 'arama yapılamadı: ' + hatalar.join(', ') };
@@ -261,7 +286,7 @@ const auth = (req, res, next) => {
   if (h === 'Bearer ' + TOKEN) return next();
   res.status(401).json({ error: 'yetkisiz' });
 };
-app.get('/health', (req, res) => res.json({ ok: true, ver: 'g3', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length }));
+app.get('/health', (req, res) => res.json({ ok: true, ver: 'g4', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length }));
 
 app.post('/chat', auth, async (req, res) => {
   try {
