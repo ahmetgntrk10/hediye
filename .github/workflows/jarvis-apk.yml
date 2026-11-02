@@ -1611,9 +1611,20 @@ jobs:
               try { getBridge().getWebView().setBackgroundColor(Color.TRANSPARENT); } catch (Exception e) {}
               try { getBridge().getWebView().getSettings().setMediaPlaybackRequiresUserGesture(false); } catch (Exception e) {}
             }
+            private long volKey = 0;
+            @Override
+            public boolean onKeyDown(int code, android.view.KeyEvent ev) {
+              if (code == android.view.KeyEvent.KEYCODE_VOLUME_UP || code == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) volKey = System.currentTimeMillis();
+              return super.onKeyDown(code, ev);
+            }
             @Override
             public boolean onTouchEvent(MotionEvent e) {
-              if (e.getAction() == MotionEvent.ACTION_OUTSIDE) { if (!keep) finish(); return true; }
+              if (e.getAction() == MotionEvent.ACTION_OUTSIDE) {
+                int sw = getResources().getDisplayMetrics().widthPixels;
+                boolean volPanel = e.getRawX() > sw * 0.78f || System.currentTimeMillis() - volKey < 7000;
+                if (!keep && !volPanel) finish();
+                return true;
+              }
               return super.onTouchEvent(e);
             }
             @Override
