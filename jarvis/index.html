@@ -310,7 +310,7 @@ $('bDx').onclick=async()=>{const o=$('dx');const out=[];const P=()=>{o.textConte
   await T('Telefondaki Gemini',async()=>{const r=await ask('Sadece "tamam" de.',[]);return r.engine+' · '+r.model});
   if(NATIVE){const J2=PL('JarvisView');await T('Ses motoru',async()=>{const i=await J2.ttsInfo();let sp='konuştu';try{await J2.ttsSpeak({text:'Ses testi. Jarvis konuşuyor.'})}catch(e){sp='HATA: '+(e&&e.message||e)}return JSON.stringify(i)+' · '+sp+' (trLang: 0/1 = var, -1 = ses dosyası yok, -2 = Türkçe yok)'})}
   if(NATIVE){await T('Telefon sesi',async()=>{const r=await PL('JarvisView').ttsDiag();return 'ses seviyesi '+r.vol+', zil modu '+r.ringer+', dil '+r.trAvail})}
-  if(NATIVE){const J=PL('JarvisView');await T('Telefon eklentisi',async()=>{const r=await J.wakeState();return 'Erişilebilirlik: '+(await J.accState().then(x=>JSON.stringify(x)).catch(e=>'?'))})}
+  if(NATIVE){const J=PL('JarvisView');await T('Telefon eklentisi',async()=>{const r=await J.wakeState();return 'Erişilebilirlik: '+(await J.accState().then(x=>JSON.stringify(x)).catch(e=>'?'))});await T('Shizuku',async()=>{const r=await J.shizukuState();if(!r.alive)return r.installed?'Kurulu ama çalışmıyor (Shizuku\'yu başlat)':'Kurulu değil';if(!r.granted){await J.shizukuRequest().catch(()=>{});return 'Çalışıyor, izin bekliyor: açılan pencerede izin ver'}const x=await J.shizukuExec({cmd:'id'}).catch(e=>({out:'HATA '+(e.message||e)}));return 'Hazır (uid '+r.uid+') · '+String(x.out||x.err||'').trim().slice(0,80)})}
   if(NATIVE){await T('Hey asistan dinleyicisi',async()=>{const r=await PL('JarvisView').wakeState();return JSON.stringify(r)})}
   out.push('Bitti. Bu yazıların ekran görüntüsünü gönder.');P()};
 /* ---------- main flow ---------- */
