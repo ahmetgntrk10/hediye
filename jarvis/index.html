@@ -285,6 +285,11 @@ async function runActs(list){const acts=[...list.filter(a=>QUIET.has(a.t)),...li
 async function resumeActs(){if(actsRunning)return;const r=store.get('rest',[]);if(!r||!r.length)return;log('s','Yarım kalan '+r.length+' iş devam ediyor.');const rs=await runActs(r);if(rs){log('j',rs);if(!MINI&&!busy)say(rs)}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(resumeActs,1200)});
 setInterval(async()=>{try{if(offline()||busy||!NATIVE||pend)return;const q=store.get('qlocal',[]);if(!q.length)return;const x=q.shift();store.set('qlocal',q);pend={t:'confirm',loose:true,fn:()=>local(x)};const m='İnternet geldi. Bekleyen iş: '+x+'. Yapayım mı? Evet de.';log('j',m);if(!MINI)await say(m)}catch(e){}},20000);
+const NOW=/(^|\s)(hayır|hayir|yok|yapma\w*|vazgeç\w*|iptal|olmaz|olmasın|istemiyorum|istemem|dur\b|durdur|bırak\w*|boşver\w*|gerek yok|gerekmez|lazım değil|sonra|şimdi değil|değil|hiç|asla|no\b|nope)/;
+const YESW=/(^|\s)(evet|eet|he\b|hı\b|hıhı|tamam\w*|olur\w*|olabilir|olsun|yap\w*|al\b|alabilirsin|alsana|ekle\w*|koy\w*|kaydet\w*|onay\w*|aynen|tabii?\w*|kesin\w*|elbette|peki|ok\b|okey|okay|devam|git\w*|gönder\w*|ara\b|başla\w*|uygun|güzel|iyi\b|doğru|mantıklı|yes|yep|sure|isterim|istiyorum|lütfen|harika|süper)/;
+async function yesNo(l){l=String(l||'').toLowerCase().trim();if(NOW.test(l))return false;if(YESW.test(l))return true;
+  if(!offline()){try{const r=JSON.parse(jx(await llmJson('Kullanıcının cevabı bir soruya onay mı ret mi? Sadece {"c":"evet"} veya {"c":"hayir"} veya {"c":"belirsiz"} döndür.','Cevap: '+l)));if(r.c==='evet')return true;if(r.c==='hayir')return false}catch(e){}}
+  return null}
 function queueTask(t){const q=store.get('queue',[]);q.push(t);store.set('queue',q);srvStat()}
 async function syncQueue(){const q=store.get('queue',[]);if(!q.length||!srvOn()||offline())return;try{await srvCall('/tasks',{tasks:q});store.set('queue',[]);srvStat();log('s',q.length+' bekleyen görev sunucuya gönderildi, başlıyor.');return q.length}catch(e){log('s','Görevler gönderilemedi: '+e.message)}}
 async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);let r=o.reply||'';if(o.ms)log('s','sunucu '+(o.ms/1000).toFixed(1)+'s'+(o.engine?' · '+o.engine:'')+(o.hata?' · uyarı: '+o.hata:''));if(NATIVE&&o.actions&&o.actions.length){const rs=await runActs(o.actions);if(rs&&(!r||/Yapamadım|yok|izin|Hangisi|Birden fazla/i.test(rs)))r+=(r?' ':'')+rs}return r||'Tamam.'}
@@ -539,7 +544,7 @@ async function pickContact(name,then,text){await ensurePerms();let list;try{list
   if(!list.length)return{err:name+' adında kimse bulamadım.'};
   if(list.length>1&&new Set(list.map(x=>nrm(x.name))).size>0&&list.length>1){pend={t:'pick',list,then,text};return{err:'Birden fazla kişi var: '+list.map((x,i)=>(i+1)+') '+x.name).join(', ')+'. Kaçıncı?'}}
   return{c:list[0]}}
-async function actCall(name){const em=emergency(name);if(em){pend={t:'confirm',fn:()=>dialNow({name:em[0],number:em[1]})};return em[0]+' aranacak. Emin misin? Aramak için evet de, vazgeçmek için hayır de.'}
+async function actCall(name){const em=emergency(name);if(em){pend={t:'confirm',strict:true,fn:()=>dialNow({name:em[0],number:em[1]})};return em[0]+' aranacak. Emin misin? Aramak için evet de, vazgeçmek için hayır de.'}
   const r=await pickContact(name,'call');return r.err||await dialNow(r.c)}
 async function smsFlow(c,text){if(!text){pend={t:'smsText',c};return 'Ne yazayım?'}pend={t:'smsConfirm',c,text};return c.name+' kişisine şunu göndereyim mi: '+text+' ?'}
 async function actSms(name,text){const r=await pickContact(name,'sms',text);return r.err||await smsFlow(r.c,text)}
@@ -646,7 +651,7 @@ function waName(l){return l.replace(/['’]/g,'').split(/\s+/).filter(w=>w&&!/^(
 async function phoneCmd(l,t){const J=PL('JarvisView');let m;
   if(pend){const P=pend;pend=null;
     if(/^(vazgeç|iptal|hayır|yok|boşver|gönderme|durdur)/.test(l))return'Tamam, iptal.';
-    if(P.t==='confirm'){if(P.loose?!/^(hayır|hayir|yok|vazgeç|vazgec|istemiyorum|dur\b|durdur|iptal|olmaz|gerek yok|boşver|bosver|değil)/.test(l):/^(evet|tamam|ara|onay|aynen|olur|al\b|ekle|koy)/.test(l))return await P.fn();return'Tamam, yapmadım.'}
+    if(P.t==='confirm'){const yn=P.strict?/^(evet|tamam|ara|onay|aynen|olur)/.test(l):await yesNo(l);if(yn===true)return await P.fn();if(yn===null){pend=P;return'Anlayamadım, yapayım mı? Evet ya da hayır de.'}return'Tamam, yapmadım.'}
     if(P.t==='pick'){const w={birinci:1,ilk:1,ikinci:2,üçüncü:3,dördüncü:4,beşinci:5},n=parseInt((l.match(/\d+/)||[])[0])||w[l.split(' ')[0]]||0,c=P.list[n-1];if(!c){pend=P;return'Hangisi? Numarasını söyle.'}
       if(P.then==='call')return await dialNow(c);if(P.then==='sms')return await smsFlow(c,P.text);if(P.then==='wa')return await waOpen(c,P.text)}
     if(P.t==='waText')return await actWa(P.name,t);
@@ -661,7 +666,7 @@ async function phoneCmd(l,t){const J=PL('JarvisView');let m;
     return await actWa(m[1],tx)}
   m=l.match(/^(.+?)['’]?\s*(?:ye|ya|e|a|na|ne)\s+(whatsapp\w*|sms|mesaj)\s*(?:at|gönder|yaz|yolla)\w*[:,]?\s*(.*)$/);
   if(m&&!/(\s+ve\s+|\s+ile\s+|,)/.test(m[1])){const txt=(t.match(/(?:at|gönder\w*|yaz\w*|yolla\w*)[:,]?\s+(.+)$/i)||[])[1]||'';return/^whatsapp/.test(m[2])?await actWa(m[1],txt):await actSms(m[1],txt)}
-  if(/(mesaj|whatsapp|konuşma|sohbet)/.test(l)&&/(^|\s)(sil|silsene|silebilir misin|silermisin|silar mısın|sil lütfen)(\s|$)/.test(l)){pend={t:'confirm',fn:()=>agent('Kullanıcı şunu istedi: "'+t+'". Doğru sohbeti aç, istenen mesaja uzun bas, sil seçeneğiyle SADECE o mesajı sil.',true)};return 'Bunu silmemi onaylıyor musun: '+t+' Evet de.'}
+  if(/(mesaj|whatsapp|konuşma|sohbet)/.test(l)&&/(^|\s)(sil|silsene|silebilir misin|silermisin|silar mısın|sil lütfen)(\s|$)/.test(l)){pend={t:'confirm',strict:true,fn:()=>agent('Kullanıcı şunu istedi: "'+t+'". Doğru sohbeti aç, istenen mesaja uzun bas, sil seçeneğiyle SADECE o mesajı sil.',true)};return 'Bunu silmemi onaylıyor musun: '+t+' Evet de.'}
   if(/whats?app|vatsap/.test(l)&&/\bara(sın|r mısın|sana)?\b|arama/.test(l)&&!/mesaj|yaz/.test(l)){const nm=waName(l);
     if(nm&&nm.length<30&&J.waCall){try{const r=await J.waCall({name:nm,video:/görüntülü/.test(l)});if(r&&r.ok)return (r.name||nm)+" WhatsApp'ta aranıyor."}catch(e){}}
     return await agent('Kullanıcı şunu istedi: "'+t+'". WhatsApp\'ta ilgili kişiyi bul, sohbetini aç ve sesli ara.');}
