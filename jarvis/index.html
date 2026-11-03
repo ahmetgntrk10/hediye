@@ -205,6 +205,7 @@ async function local(t){
   if(MINI&&/^(tamam|kapat|sağ ol|teşekkür|görüşürüz|yeter|bu kadar|hepsi bu)/.test(l)){setTimeout(closePanel,200);return''}
   if(lastVis&&/(google\w*\s*(da|de)?\s*(arat|ara)|aratsana|araştır)/.test(l)&&!/^(.+?)\s+ara$/.test(l.replace(/google\w*\s*(da|de)?\s*/,''))){const q=lastVis;lastVis=null;openUrl('https://www.google.com/search?q='+encodeURIComponent(q));return'Google\'da aratıyorum: '+q}
   if(NATIVE&&/arka plan(da)? (testi|dene)/.test(l))return await szBgTest();
+  if(NATIVE&&/arka plan modu/.test(l)){const off=/(kapat|kapa|durdur)/.test(l);store.set('bgOff',off);return off?'Arka plan modunu kapattım. WhatsApp ekranda açılacak.':'Arka plan modunu açtım.'}
   if(NATIVE&&/(ekrana bak|ekranda ne var|ekranı (oku|yorumla|anlat)|bu ne\b|bunu yorumla|şuna bak|bu görsel|bu resim|bu fotoğraf)/.test(l))return await lookScreen(t)
   if(/haber/.test(l)&&/(bak|oku|neler|son|ver|anlat|göster)/.test(l)){const n=await newsNow();if(n)return n}
   if(siteOpen&&/kapat|gizle|geri dön|çık/.test(l)){closeSite();return''}
@@ -550,7 +551,7 @@ async function smsFlow(c,text){if(!text){pend={t:'smsText',c};return 'Ne yazayı
 async function actSms(name,text){const r=await pickContact(name,'sms',text);return r.err||await smsFlow(r.c,text)}
 async function actWa(name,text){if(text&&PL('JarvisView')&&PL('JarvisView').notifReply){try{const r=await PL('JarvisView').notifReply({name,text});if(r&&r.r==='ok')return name+' kişisine arka planda gönderdim.'}catch(e){}}
   const r=await pickContact(name,'wa',text);if(r.err)return r.err;return await waOpen(r.c,text)}
-async function waOpen(c,text){let n=(c.number||'').replace(/\D/g,'');if(n.length===11&&n[0]==='0')n='9'+n;else if(n.length===10)n='90'+n;try{await PL('AppLauncher').openUrl({url:'https://wa.me/'+n+(text?'?text='+encodeURIComponent(text):'')})}catch(e){return'WhatsApp açılamadı.'}if(text&&await szOn()){await sleep(1800);for(let i=0;i<8;i++){const d=await szDump().catch(()=>null);const n=d&&d.n.find(x=>/^(gönder|send)$/i.test(x.t)&&x.c);if(n){SZ.nodes=d.n;await szAct({a:'click',idx:n.i});return c.name+' kişisine gönderdim.'}await sleep(900)}}
+async function waOpen(c,text){let n=(c.number||'').replace(/\D/g,'');if(n.length===11&&n[0]==='0')n='9'+n;else if(n.length===10)n='90'+n;if(text&&await waBg(n,text))return c.name+' kişisine gönderdim.';try{await PL('AppLauncher').openUrl({url:'https://wa.me/'+n+(text?'?text='+encodeURIComponent(text):'')})}catch(e){return'WhatsApp açılamadı.'}if(text&&await szOn()){await sleep(1800);for(let i=0;i<8;i++){const d=await szDump().catch(()=>null);const n=d&&d.n.find(x=>/^(gönder|send)$/i.test(x.t)&&x.c);if(n){SZ.nodes=d.n;await szAct({a:'click',idx:n.i});return c.name+' kişisine gönderdim.'}await sleep(900)}}
   if(text&&await accOn()){await sleep(2000);let o=null;for(let i=0;i<8&&!(o&&o.ok);i++){for(const w of ['Gönder','Send','Gönder ']){o=await PL('JarvisView').act({a:'click',text:w}).catch(()=>null);if(o&&o.ok)break}if(!(o&&o.ok))await sleep(1000)}if(o&&o.ok)return c.name+' kişisine gönderdim.'}let dg='';try{const d=await szDump();if(d)dg=' Ekranda: '+d.n.filter(x=>x.c&&x.t).map(x=>x.t).slice(0,8).join(', ')}catch(e){}if(text)log('s','Gönder bulunamadı.'+(dg||(await szOn()?' ekran okunamadı':' Shizuku hazır değil')));return c.name+' için WhatsApp açıldı'+(text?', gönder tuşuna bas.':'.')}
 const fm=(h,m)=>String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -580,6 +581,12 @@ async function szAct(o){const dd=SZ.disp?'-d '+SZ.disp+' ':'';
   }return null}
 async function act2(o){const J=PL('JarvisView');if(SZ.src&&SZ.ok){try{const r=await szAct(o);if(r)return r}catch(e){}}return await J.act(o)}
 async function scr(){if(await szOn()){try{const d=await szDump();if(d){SZ.nodes=d.n;SZ.src=true;return{pkg:d.pkg,n:d.n}}}catch(e){}}SZ.src=false;try{const r=await PL('JarvisView').screen();return JSON.parse(r.nodes||'{"pkg":"","n":[]}')}catch(e){return{pkg:'',n:[]}}}
+async function bgOpen(){try{const ids=async()=>{const x=await sh("dumpsys display | grep -o 'mDisplayId=[0-9]*' | sort -u");return(x.out||'').match(/\d+/g)||[]};const b=await ids();await sh('settings put global overlay_display_devices "720x1280/240"');for(let i=0;i<6;i++){await sleep(700);const a=(await ids()).filter(x=>!b.includes(x));if(a.length)return a[0]}}catch(e){}return 0}
+async function bgClose(){SZ.disp=0;try{await sh('settings put global overlay_display_devices ""')}catch(e){}}
+async function waBg(n,text){if(!text||store.get('bgOff',false)||!await szOn())return false;const id=await bgOpen();if(!id){await bgClose();return false}
+  try{SZ.disp=id;await sh('am start --display '+id+' -a android.intent.action.VIEW -p com.whatsapp -d '+shq('https://wa.me/'+n+'?text='+encodeURIComponent(text)));await sleep(2500);
+    for(let i=0;i<8;i++){const d=await szDump().catch(()=>null);const s=d&&d.n.find(x=>/^(gönder|send)$/i.test(x.t)&&x.c);if(s){SZ.nodes=d.n;await szAct({a:'click',idx:s.i});await sleep(1500);await bgClose();return true}await sleep(900)}}catch(e){}
+  await bgClose();return false}
 async function szBgTest(){let L=[];try{if(!await szOn())return'Shizuku hazır değil.';
   const ids=async()=>{const x=await sh("dumpsys display | grep -o 'mDisplayId=[0-9]*' | sort -u");return(x.out||'').match(/\d+/g)||[]};
   const b=await ids();await sh('settings put global overlay_display_devices "720x1280/240"');await sleep(2500);const a=await ids();const nw=a.filter(x=>!b.includes(x));
