@@ -584,10 +584,14 @@ async function act2(o){const J=PL('JarvisView');if(SZ.src&&SZ.ok){try{const r=aw
 async function scr(){if(await szOn()){try{const d=await szDump();if(d){SZ.nodes=d.n;SZ.src=true;return{pkg:d.pkg,n:d.n}}}catch(e){}}SZ.src=false;try{const r=await PL('JarvisView').screen();return JSON.parse(r.nodes||'{"pkg":"","n":[]}')}catch(e){return{pkg:'',n:[]}}}
 async function bgOpen(){try{const ids=async()=>{const x=await sh("dumpsys display | grep -o 'mDisplayId=[0-9]*' | sort -u");return(x.out||'').match(/\d+/g)||[]};const b=await ids();await sh('settings put global overlay_display_devices "720x1280/240,own_content_only"');clearTimeout(bgTimer);bgTimer=setTimeout(bgClose,40000);for(let i=0;i<6;i++){await sleep(700);const a=(await ids()).filter(x=>!b.includes(x));if(a.length)return a[0]}}catch(e){}return 0}
 let bgTimer=0;async function bgClose(){clearTimeout(bgTimer);SZ.disp=0;try{await sh('settings put global overlay_display_devices ""')}catch(e){}}
-async function waBg(n,text){if(!text||store.get('bgOff',false)||!await szOn())return false;const id=await bgOpen();if(!id){await bgClose();return false}
+async function waBg(n,text){if(!text||store.get('bgOff',false)||!await szOn())return false;let before='';try{const p=await szDump();before=p?p.pkg:''}catch(e){}
+  const id=await bgOpen();if(!id){await bgClose();return false}let ok=false;
   try{SZ.disp=id;await sh('am start --display '+id+' -a android.intent.action.VIEW -p com.whatsapp -d '+shq('https://wa.me/'+n+'?text='+encodeURIComponent(text)));await sleep(2500);
-    for(let i=0;i<8;i++){const d=await szDump().catch(()=>null);const s=d&&d.n.find(x=>/^(gönder|send)$/i.test(x.t)&&x.c);if(s){SZ.nodes=d.n;await szAct({a:'click',idx:s.i});await sleep(1500);await bgClose();return true}await sleep(900)}}catch(e){}
-  await bgClose();return false}
+    for(let i=0;i<8&&!ok;i++){const d=await szDump().catch(()=>null);const s=d&&d.n.find(x=>/^(gönder|send)$/i.test(x.t)&&x.c);if(s){SZ.nodes=d.n;await szAct({a:'click',idx:s.i});ok=true;await sleep(1500)}else await sleep(900)}
+    for(let i=0;i<4;i++){await sh('input -d '+id+' keyevent 4');await sleep(450)}}catch(e){}
+  await bgClose();
+  try{await sleep(900);const p=await szDump();if(p&&p.pkg==='com.whatsapp'&&before!=='com.whatsapp')await sh('input keyevent 3')}catch(e){}
+  return ok}
 async function szBgTest(){let L=[];try{if(!await szOn())return'Shizuku hazır değil.';
   const ids=async()=>{const x=await sh("dumpsys display | grep -o 'mDisplayId=[0-9]*' | sort -u");return(x.out||'').match(/\d+/g)||[]};
   const b=await ids();await sh('settings put global overlay_display_devices "720x1280/240,own_content_only"');await sleep(2500);const a=await ids();const nw=a.filter(x=>!b.includes(x));
