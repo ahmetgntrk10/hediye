@@ -632,6 +632,12 @@ jobs:
               call.resolve();
             }
             @PluginMethod
+            public void mediaVol(PluginCall call) {
+              JSObject r = new JSObject();
+              try { r.put("vol", ((AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE)).getStreamVolume(AudioManager.STREAM_MUSIC)); } catch (Exception e) { r.put("vol", 0); }
+              call.resolve(r);
+            }
+            @PluginMethod
             public void minVol(PluginCall call) {
               try {
                 AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
@@ -1389,6 +1395,37 @@ jobs:
             private TextToSpeech tts;
             private boolean ready = false;
             private final Set<String> seen = new HashSet<String>();
+            private final java.util.ArrayList<String> held = new java.util.ArrayList<String>();
+            private long onSince = 0;
+            private boolean loopOn = false;
+            private final android.os.Handler hh = new android.os.Handler(android.os.Looper.getMainLooper());
+            private int musicVol() {
+              try { return ((AudioManager) getSystemService(Context.AUDIO_SERVICE)).getStreamVolume(AudioManager.STREAM_MUSIC); } catch (Exception e) { return 0; }
+            }
+            private void sayNow(String s) {
+              try {
+                AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                if (am.getMode() == AudioManager.MODE_NORMAL) tts.speak(s, TextToSpeech.QUEUE_ADD, null, "r" + System.nanoTime());
+              } catch (Exception e) {}
+            }
+            private void speakRem(String s) {
+              if (musicVol() > 0 && held.isEmpty()) { sayNow(s); return; }
+              held.add(s);
+              if (loopOn) return;
+              loopOn = true;
+              onSince = 0;
+              hh.postDelayed(new Runnable() { public void run() {
+                if (held.isEmpty()) { loopOn = false; return; }
+                if (musicVol() > 0) {
+                  if (onSince == 0) onSince = System.currentTimeMillis();
+                  if (System.currentTimeMillis() - onSince >= 120000) {
+                    for (String h : new java.util.ArrayList<String>(held)) sayNow(h);
+                    held.clear(); loopOn = false; return;
+                  }
+                } else onSince = 0;
+                hh.postDelayed(this, 5000);
+              }}, 5000);
+            }
             private static final String[] MSG = { "com.whatsapp", "com.whatsapp.w4b", "org.telegram.messenger", "com.instagram.android", "com.google.android.apps.messaging", "com.android.mms", "com.samsung.android.messaging", "com.facebook.orca", "com.twitter.android", "com.android.dialer", "com.google.android.dialer", "com.samsung.android.dialer", "com.android.server.telecom" };
             @Override
             public void onListenerConnected() {
@@ -1465,9 +1502,7 @@ jobs:
                   CharSequence t0 = b0.getCharSequence(Notification.EXTRA_TITLE);
                   CharSequence x0 = b0.getCharSequence(Notification.EXTRA_TEXT);
                   if (t0 != null && x0 != null && (t0.toString().toLowerCase().contains("atirlatma") || t0.toString().toLowerCase().contains("nemli")) && seen.add(sbn.getKey() + "|" + x0)) {
-                    AudioManager am0 = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-                    try { int mx0 = am0.getStreamMaxVolume(AudioManager.STREAM_MUSIC); if (am0.getStreamVolume(AudioManager.STREAM_MUSIC) < mx0 / 2) am0.setStreamVolume(AudioManager.STREAM_MUSIC, mx0 / 2, 0); } catch (Exception e0) {}
-                    if (am0.getMode() == AudioManager.MODE_NORMAL) tts.speak((t0.toString().toLowerCase().contains("atirlatma") ? "Hatırlatma: " : "Önemli mesaj: ") + x0, TextToSpeech.QUEUE_ADD, null, "r" + System.nanoTime());
+                    speakRem((t0.toString().toLowerCase().contains("atirlatma") ? "Hatırlatma: " : "Önemli mesaj: ") + x0);
                   }
                   return;
                 }
