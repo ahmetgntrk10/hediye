@@ -31,6 +31,8 @@ jobs:
         run: |
           mkdir -p www
           cp ../jarvis/index.html www/index.html
+          sed -i "s/const JBUILD=0;/const JBUILD=${{ github.run_number }};/" www/index.html
+          grep -c "const JBUILD=${{ github.run_number }};" www/index.html
 
       - name: Android projesi
         working-directory: jarvis-app
@@ -434,8 +436,9 @@ jobs:
                 }
                 JSObject r = new JSObject();
                 if (best != null) {
-                  getContext().startActivity(newTask(pm.getLaunchIntentForPackage(best.packageName)));
+                  if (!call.getBoolean("dry", false)) getContext().startActivity(newTask(pm.getLaunchIntentForPackage(best.packageName)));
                   r.put("ok", true);
+                  r.put("pkg", best.packageName);
                   r.put("label", bestLabel);
                 } else r.put("ok", false);
                 call.resolve(r);
@@ -1795,4 +1798,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete jarvis-latest --yes --cleanup-tag || true
-          gh release create jarvis-latest jarvis.apk --title "Jarvis son surum" --notes "Test APK. Telefondan indirip kur." --target ${{ github.sha }}
+          gh release create jarvis-latest jarvis.apk --title "Jarvis son surum" --notes "Test APK. build ${{ github.run_number }}" --target ${{ github.sha }}

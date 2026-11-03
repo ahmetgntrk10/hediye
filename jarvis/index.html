@@ -205,6 +205,7 @@ async function local(t){
   if(MINI&&/^(tamam|kapat|sağ ol|teşekkür|görüşürüz|yeter|bu kadar|hepsi bu)/.test(l)){setTimeout(closePanel,200);return''}
   if(lastVis&&/(google\w*\s*(da|de)?\s*(arat|ara)|aratsana|araştır)/.test(l)&&!/^(.+?)\s+ara$/.test(l.replace(/google\w*\s*(da|de)?\s*/,''))){const q=lastVis;lastVis=null;openUrl('https://www.google.com/search?q='+encodeURIComponent(q));return'Google\'da aratıyorum: '+q}
   if(NATIVE&&/arka plan(da)? (testi|dene)/.test(l))return await szBgTest();
+  if(/(ne yaptın|neler yaptın|son yaptıkların|yaptıklarını (say|anlat)|bugün ne yaptın|ne iş yaptın)/.test(l)){const a=store.get('alog',[]).filter(x=>Date.now()-x.t<864e5).slice(-5);if(!a.length)return'Bugün telefonda bir iş yapmadım.';return a.map(x=>new Date(x.t).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})+' '+x.s).join('. ')}
   if(NATIVE&&/arka plan modu/.test(l)){const off=/(kapat|kapa|durdur)/.test(l);store.set('bgOff',off);try{await bgClose()}catch(e){}return off?'Arka plan modunu kapattım. WhatsApp ekranda açılacak.':'Arka plan modunu açtım.'}
   if(NATIVE&&/(ekrana bak|ekranda ne var|ekranı (oku|yorumla|anlat)|bu ne\b|bunu yorumla|şuna bak|bu görsel|bu resim|bu fotoğraf)/.test(l))return await lookScreen(t)
   if(/haber/.test(l)&&/(bak|oku|neler|son|ver|anlat|göster)/.test(l)){const n=await newsNow();if(n)return n}
@@ -541,22 +542,36 @@ const nrm=x=>x.toLowerCase().replace(/̇/g,'').replace(/ı/g,'i').replace(/ş/g,
 function nameCands(raw){raw=raw.trim().replace(/['’]/g,'');const out=[raw];for(const x of['yi','yı','yu','yü','ye','ya','ni','nı','i','ı','u','ü','e','a']){if(raw.length>x.length+2&&raw.endsWith(x))out.push(raw.slice(0,-x.length))}return[...new Set(out)]}
 async function findContact(raw){const J=PL('JarvisView');for(const c of nameCands(raw)){const r=await J.contact({name:c});if(r&&r.list&&r.list.length)return r.list}return[]}
 async function ensurePerms(){if(ensurePerms.done)return;ensurePerms.done=true;try{await PL('JarvisView').perms()}catch(e){}}
-async function dialNow(c){const r=await PL('JarvisView').dial({number:c.number});return c.name+(r&&r.direct?' aranıyor.':' için çevirici açıldı.')}
+async function dialNow(c){const r=await PL('JarvisView').dial({number:c.number});alog('Aradım: '+c.name);return c.name+(r&&r.direct?' aranıyor.':' için çevirici açıldı.')}
 async function pickContact(name,then,text){await ensurePerms();let list;try{list=await findContact(name)}catch(e){return{err:'Rehbere erişemedim. Telefon ayarlarından JARVIS için kişiler iznini ver.'}}
   if(!list.length)return{err:name+' adında kimse bulamadım.'};
   if(list.length>1&&new Set(list.map(x=>nrm(x.name))).size>0&&list.length>1){pend={t:'pick',list,then,text};return{err:'Birden fazla kişi var: '+list.map((x,i)=>(i+1)+') '+x.name).join(', ')+'. Kaçıncı?'}}
+  {const c0=list[0],a=nrm(c0.name),b=nrm(name);if(b&&!a.includes(b)&&!b.includes(a)){pend={t:'confirm',fn:async()=>then==='call'?await dialNow(c0):then==='sms'?await smsFlow(c0,text):await waOpen(c0,text)};return{err:name+' dedin, rehberde '+c0.name+' var. Onu mu yapayım?'}}}
   return{c:list[0]}}
 async function actCall(name){const em=emergency(name);if(em){pend={t:'confirm',strict:true,fn:()=>dialNow({name:em[0],number:em[1]})};return em[0]+' aranacak. Emin misin? Aramak için evet de, vazgeçmek için hayır de.'}
   const r=await pickContact(name,'call');return r.err||await dialNow(r.c)}
 async function smsFlow(c,text){if(!text){pend={t:'smsText',c};return 'Ne yazayım?'}pend={t:'smsConfirm',c,text};return c.name+' kişisine şunu göndereyim mi: '+text+' ?'}
 async function actSms(name,text){const r=await pickContact(name,'sms',text);return r.err||await smsFlow(r.c,text)}
-async function actWa(name,text){if(text&&PL('JarvisView')&&PL('JarvisView').notifReply){try{const r=await PL('JarvisView').notifReply({name,text});if(r&&r.r==='ok')return name+' kişisine arka planda gönderdim.'}catch(e){}}
+async function actWa(name,text){if(text&&PL('JarvisView')&&PL('JarvisView').notifReply){try{const r=await PL('JarvisView').notifReply({name,text});if(r&&r.r==='ok'){alog('WhatsApp (bildirimden) '+name+' · '+text.slice(0,40));return name+' kişisine arka planda gönderdim.'}}catch(e){}}
   const r=await pickContact(name,'wa',text);if(r.err)return r.err;return await waOpen(r.c,text)}
-async function waOpen(c,text){let n=(c.number||'').replace(/\D/g,'');if(n.length===11&&n[0]==='0')n='9'+n;else if(n.length===10)n='90'+n;if(text&&await waBg(n,text))return c.name+' kişisine gönderdim.';try{await PL('AppLauncher').openUrl({url:'https://wa.me/'+n+(text?'?text='+encodeURIComponent(text):'')})}catch(e){return'WhatsApp açılamadı.'}if(text&&await szOn()){await sleep(1800);for(let i=0;i<8;i++){const d=await szDump().catch(()=>null);const n=d&&d.n.find(x=>/^(gönder|send)$/i.test(x.t)&&x.c);if(n){SZ.nodes=d.n;await szAct({a:'click',idx:n.i});return c.name+' kişisine gönderdim.'}await sleep(900)}}
+async function waOpen(c,text){const r=await waOpen0(c,text);alog('WhatsApp '+c.name+(text?' · '+text.slice(0,40):'')+' → '+r);return r}
+async function waOpen0(c,text){let n=(c.number||'').replace(/\D/g,'');if(n.length===11&&n[0]==='0')n='9'+n;else if(n.length===10)n='90'+n;if(text){const bg=await waBg(n,text);if(bg===true)return c.name+' kişisine gönderdim.';if(bg==='unsure')return'Gönderdiğimden emin olamadım. WhatsApp\'a bir bakar mısın?'}try{await PL('AppLauncher').openUrl({url:'https://wa.me/'+n+(text?'?text='+encodeURIComponent(text):'')})}catch(e){return'WhatsApp açılamadı.'}if(text&&await szOn()){await sleep(1800);for(let i=0;i<8;i++){const d=await szDump().catch(()=>null);const n=d&&d.n.find(x=>/^(gönder|send)$/i.test(x.t)&&x.c);if(n){SZ.nodes=d.n;await szAct({a:'click',idx:n.i});return c.name+' kişisine gönderdim.'}await sleep(900)}}
   if(text&&await accOn()){await sleep(2000);let o=null;for(let i=0;i<8&&!(o&&o.ok);i++){for(const w of ['Gönder','Send','Gönder ']){o=await PL('JarvisView').act({a:'click',text:w}).catch(()=>null);if(o&&o.ok)break}if(!(o&&o.ok))await sleep(1000)}if(o&&o.ok)return c.name+' kişisine gönderdim.'}let dg='';try{const d=await szDump();if(d)dg=' Ekranda: '+d.n.filter(x=>x.c&&x.t).map(x=>x.t).slice(0,8).join(', ')}catch(e){}if(text)log('s','Gönder bulunamadı.'+(dg||(await szOn()?' ekran okunamadı':' Shizuku hazır değil')));return c.name+' için WhatsApp açıldı'+(text?', gönder tuşuna bas.':'.')}
 const fm=(h,m)=>String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let accWhy='';async function accOn(){try{const r=await PL('JarvisView').accState();accWhy=(r&&!r.on&&r.enabled)?'Erişilebilirlik açık görünüyor ama servis uyumuş. Ayarlarda Jarvis erişilebilirliğini kapatıp tekrar aç.':'Bunun için erişilebilirlik iznini vermen lazım. Ayarlarda "erişilebilirlik izni ver" düğmesine bas ve Jarvis\'i aç.';return!!(r&&r.on)}catch(e){return false}}
+const JBUILD=0;
+function alog(s){try{const a=store.get('alog',[]);a.push({t:Date.now(),s:String(s).slice(0,140)});store.set('alog',a.slice(-150))}catch(e){}}
+async function volOn(){try{return(await PL('JarvisView').mediaVol()).vol>0}catch(e){return true}}
+async function bgFinish(id,before){if(id){try{await sh('input -d '+id+' keyevent 4; sleep 0.25; input -d '+id+' keyevent 4; sleep 0.25; input -d '+id+' keyevent 4')}catch(e){}}await bgClose();
+  try{await sleep(500);const x=String((await sh("dumpsys activity activities | grep -m1 -E 'topResumedActivity|mResumedActivity'")).out||'');if(!before&&/com\.whatsapp\//.test(x))await sh('input keyevent 3')}catch(e){}}
+function bgTouch(){clearTimeout(bgTimer);bgTimer=setTimeout(bgClose,45000)}
+const BANKRX=/(bank|garanti|akbank|ziraat|isbank|yapikredi|denizbank|enpara|papara|paypal|finans|vakif|halkbank|kuveyt|tosla|binance|wallet|cuzdan|ininal|fups|hepsipay|iyzico)/i;
+let szWas=false;try{szWas=!!store.get('szWas',false)}catch(e){}let szWarn=false;
+setInterval(async()=>{try{if(!NATIVE)return;SZ.t=0;const ok=await szOn();if(ok){szWas=true;store.set('szWas',true);szWarn=false}else if(szWas&&!szWarn&&!busy){szWarn=true;const m='Shizuku kapanmış. Arka plan işleri için Shizuku\'yu açıp Başlat\'a bas.';log('j',m);if(!MINI&&await volOn())say(m)}}catch(e){}},120000);
+let batWarn=0;setInterval(async()=>{try{const b=await navigator.getBattery();if(b.level<=0.15&&!b.charging&&Date.now()-batWarn>3600000&&!busy){batWarn=Date.now();const m='Pilin yüzde '+Math.round(b.level*100)+'. Şarja takmayı unutma.';log('j',m);if(!MINI&&await volOn())say(m)}}catch(e){}},180000);
+let updAsked=0;async function updCheck(){try{if(!NATIVE||!JBUILD||offline())return;const H=PL('CapacitorHttp');if(!H)return;const r=await H.get({url:'https://api.github.com/repos/ahmetgntrk10/hediye/releases/tags/jarvis-latest',responseType:'json'});const d=r&&r.data;const n=parseInt(((d&&d.body)||'').match(/build (\d+)/)?.[1]||'0');if(n>JBUILD&&updAsked!==n&&!busy&&!pend){updAsked=n;pend={t:'confirm',fn:async()=>{try{await PL('AppLauncher').openUrl({url:'https://github.com/ahmetgntrk10/hediye/releases/tag/jarvis-latest'})}catch(e){}return'Sürüm sayfasını açtım. APK\'yı indirip kur.'}};const m='Jarvis\'in yeni sürümü var. Sürüm sayfasını açayım mı?';log('j',m);if(!MINI&&await volOn())say(m)}}catch(e){}}
+setTimeout(updCheck,40000);setInterval(updCheck,6*3600000);
 let SZ={ok:false,t:0,disp:0,nodes:[],src:false,w:1080,h:2400};
 function shq(s){return "'"+String(s).replace(/'/g,"'\\''")+"'"}
 async function szOn(){if(!NATIVE)return false;if(Date.now()-SZ.t<15000)return SZ.ok;SZ.t=Date.now();try{const J=PL('JarvisView');const r=await J.shizukuState();if(!r.alive||!r.granted){SZ.ok=false;return false}const x=await J.shizukuExec({cmd:'id'});SZ.ok=/uid=(2000|0)\b/.test(x.out||'')}catch(e){SZ.ok=false}return SZ.ok}
@@ -587,13 +602,10 @@ let bgTimer=0;async function bgClose(){clearTimeout(bgTimer);SZ.disp=0;try{await
 async function waBg(n,text){if(!text||store.get('bgOff',false)||!await szOn())return false;
   const top=async()=>{try{return String((await sh("dumpsys activity activities | grep -m1 -E 'topResumedActivity|mResumedActivity'")).out||'')}catch(e){return''}};
   const before=/com\.whatsapp\//.test(await top());
-  const id=await bgOpen();if(!id){await bgClose();return false}let ok=false;
+  const id=await bgOpen();if(!id){await bgClose();return false}let res=false;
   try{SZ.disp=id;await sh('am start --display '+id+' -a android.intent.action.VIEW -p com.whatsapp -d '+shq('https://wa.me/'+n+'?text='+encodeURIComponent(text)));await sleep(1800);
-    for(let i=0;i<6&&!ok;i++){const d=await szDump().catch(()=>null);const s=d&&d.n.find(x=>/^(gönder|send)$/i.test(x.t)&&x.c);if(s){SZ.nodes=d.n;await szAct({a:'click',idx:s.i});ok=true;await sleep(700)}else await sleep(500)}
-    await sh('input -d '+id+' keyevent 4; sleep 0.25; input -d '+id+' keyevent 4; sleep 0.25; input -d '+id+' keyevent 4')}catch(e){}
-  await bgClose();
-  try{await sleep(500);if(!before&&/com\.whatsapp\//.test(await top()))await sh('input keyevent 3')}catch(e){}
-  return ok}
+    for(let i=0;i<6&&!res;i++){const d=await szDump().catch(()=>null);const s=d&&d.n.find(x=>/^(gönder|send)$/i.test(x.t)&&x.c);if(s){SZ.nodes=d.n;await szAct({a:'click',idx:s.i});await sleep(900);const d2=await szDump().catch(()=>null);res=(d2&&d2.n.some(x=>/^(gönder|send)$/i.test(x.t)&&x.c))?'unsure':true}else await sleep(500)}}catch(e){}
+  await bgFinish(id,before);return res}
 async function szBgTest(){let L=[];try{if(!await szOn())return'Shizuku hazır değil.';
   const ids=async()=>{const x=await sh("dumpsys display | grep -o 'mDisplayId=[0-9]*' | sort -u");return(x.out||'').match(/\d+/g)||[]};
   const b=await ids();await sh('settings put global overlay_display_devices "720x1280/240,own_content_only"');await sleep(2500);const a=await ids();const nw=a.filter(x=>!b.includes(x));
@@ -619,22 +631,24 @@ async function agent(goal,del){
   try{const L=await J.locked();if(L&&L.locked)return'Telefon kilitli. Kilidi sen aç, sonra yapayım.'}catch(e){}
   if(!await accOn()&&!await szOn())return accWhy;
   if(agentOn)return'Zaten bir işle uğraşıyorum.';agentOn=true;try{await J.keep({on:true})}catch(e){}
-  const hist=[];let res='';
+  const hist=[];let res='';let bgId=0;const bgWant=!store.get('bgOff',false)&&await szOn();let bgBefore=false;
   try{for(let i=0;i<16;i++){
-    const sc=await scr();const lines=(sc.n||[]).map(n=>n.i+'|'+(n.c?'T':'')+(n.e?'E':'')+'|'+n.t).join('\n');
+    const sc=await scr();if(BANKRX.test(sc.pkg||'')){res='Bankacılık ya da para uygulamasında işlem yapmam.';break}if(bgId)bgTouch();const lines=(sc.n||[]).map(n=>n.i+'|'+(n.c?'T':'')+(n.e?'E':'')+'|'+n.t).join('\n');
     let raw,a;try{raw=await llmJson(del?AG_DEL:AG_SYS,'GÖREV: '+goal+'\nÖNCEKİ ADIMLAR: '+(hist.join(' ; ')||'yok')+'\nAÇIK UYGULAMA: '+(sc.pkg||'bilinmiyor')+'\nEKRAN:\n'+lines);a=JSON.parse(jx(raw))}catch(e){res='Beynime ulaşamadım: '+String(e&&e.message||e).slice(0,60);break}
     lastAct=Date.now();log('s','▸ '+(a.say||a.a));
     if(a.a==='done'){res=a.say||'Tamam, yaptım.';break}
     if(a.a==='fail'){res=a.say||'Yapamadım.';break}
     let r='';
-    if(a.a==='open'){const o=await J.openApp({name:a.text||''});r=o&&o.ok?'ok':'uygulama yok'}
+    if(a.a==='open'){r='';if(bgWant){try{const o=await J.openApp({name:a.text||'',dry:true});if(o&&o.pkg){if(BANKRX.test(o.pkg)){res='Bankacılık ya da para uygulamasında işlem yapmam.';break}if(!bgId){const id=await bgOpen();if(id)bgId=id}
+        if(bgId){const cm=String((await sh('cmd package resolve-activity --brief -c android.intent.category.LAUNCHER '+o.pkg+' | tail -n 1')).out||'').trim();if(cm.indexOf('/')>0){await sh('am start --display '+bgId+' -n '+cm);SZ.disp=bgId;bgTouch();r='ok'}}}}catch(e){}}
+      if(!r){SZ.disp=0;const o=await J.openApp({name:a.text||''});r=o&&o.ok?'ok':'uygulama yok'}}
     else if(a.a==='wait'){r='ok'}
     else{const o=await act2({a:a.a,text:a.text||'',idx:(a.idx==null?-1:+a.idx),dir:a.dir||'down'});r=(o&&o.msg)||''}
     hist.push((a.a||'')+(a.text?':'+a.text:'')+(a.idx>=0?'#'+a.idx:'')+' → '+r);
     await sleep(a.a==='open'?2500:1300)}
     if(!res)res='Çok uzun sürdü, yarıda bıraktım.'}
-  finally{agentOn=false;try{await J.keep({on:false})}catch(e){}}
-  return res}
+  finally{agentOn=false;try{await J.keep({on:false})}catch(e){}if(bgId){try{await bgFinish(bgId,bgBefore)}catch(e){}}SZ.disp=0}
+  alog('Görev: '+goal.slice(0,60)+' → '+String(res).slice(0,60));return res}
 async function newsNow(){try{const H=PL('CapacitorHttp');if(!H)return null;const r=await H.get({url:'https://news.google.com/rss?hl=tr&gl=TR&ceid=TR:tr',responseType:'text'});const x=String(r&&r.data||'');const it=[...x.matchAll(/<item>[\s\S]*?<title>([\s\S]*?)<\/title>/g)].slice(0,5).map(m=>m[1].replace(/<!\[CDATA\[|\]\]>/g,'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/\s+-\s+[^-]+$/,'').trim());if(it.length)return'Güncel başlıklar: '+it.map((s,i)=>(i+1)+') '+s).join('. ')}catch(e){}return null}
 const TILES=[[/wi-?fi/,'wi-?fi'],[/bluetooth/,'bluetooth'],[/konum/,'konum|location'],[/uçak/,'uçak|airplane|flight'],[/mobil veri|\bveri\b/,'mobil veri|veri|mobile data'],[/rahatsız/,'rahatsız etme|do not disturb'],[/döndür/,'döndür|rotate']];
 async function toggleTile(l){const tl=TILES.find(x=>x[0].test(l));if(!tl||!await accOn())return null;const J=PL('JarvisView'),want=!/kapat|devre dışı|söndür/.test(l);
@@ -670,7 +684,7 @@ async function phoneCmd(l,t){const J=PL('JarvisView');let m;
       if(P.then==='call')return await dialNow(c);if(P.then==='sms')return await smsFlow(c,P.text);if(P.then==='wa')return await waOpen(c,P.text)}
     if(P.t==='waText')return await actWa(P.name,t);
     if(P.t==='smsText')return await smsFlow(P.c,t);
-    if(P.t==='smsConfirm'){if(/^(evet|gönder|tamam|olur|yolla|aynen|onaylıyorum)/.test(l)){const r=await J.sms({number:P.c.number,text:P.text,send:true});return r&&r.sent?'Gönderdim.':'Mesaj uygulaması açıldı, gönder tuşuna bas.'}return'Tamam, göndermedim.'}}
+    if(P.t==='smsConfirm'){if(/^(evet|gönder|tamam|olur|yolla|aynen|onaylıyorum)/.test(l)){const r=await J.sms({number:P.c.number,text:P.text,send:true});return r&&r.sent?(alog('SMS '+P.c.name+' · '+String(P.text).slice(0,40)),'Gönderdim.'):'Mesaj uygulaması açıldı, gönder tuşuna bas.'}return'Tamam, göndermedim.'}}
   m=l.match(/^(.+?)['’]?\s*(?:ye|ya|e|a|na|ne)\s+cevap\w*\s*(?:ver|yaz|at)?\w*[:,]?\s+(.+)$/);if(m&&m[1].length<30&&!/\s(ve|ile)\s/.test(m[1])){const tx=(t.match(/cevap\w*\s*(?:ver\w*|yaz\w*|at\w*)?[:,]?\s+(.+)$/i)||[])[1]||m[2];return await actWa(m[1],tx)}
   m=l.match(/^(?:whatsapp\w*\s+|vatsap\w*\s+)?(.+?)\s+(?:kişisine|kişiye|kisisine)\s*(.*)$/);
   if(m&&/(whatsapp|vatsap|sms|mesaj)/.test(l)&&/(yaz|at|gönder|yolla)\w*/.test(m[2])&&!/(\s+ve\s+|\s+ile\s+|,)/.test(m[1])&&m[1].length<30){
