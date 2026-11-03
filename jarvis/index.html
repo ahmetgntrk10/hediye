@@ -205,7 +205,7 @@ async function local(t){
   if(MINI&&/^(tamam|kapat|sağ ol|teşekkür|görüşürüz|yeter|bu kadar|hepsi bu)/.test(l)){setTimeout(closePanel,200);return''}
   if(lastVis&&/(google\w*\s*(da|de)?\s*(arat|ara)|aratsana|araştır)/.test(l)&&!/^(.+?)\s+ara$/.test(l.replace(/google\w*\s*(da|de)?\s*/,''))){const q=lastVis;lastVis=null;openUrl('https://www.google.com/search?q='+encodeURIComponent(q));return'Google\'da aratıyorum: '+q}
   if(NATIVE&&/arka plan(da)? (testi|dene)/.test(l))return await szBgTest();
-  if(NATIVE&&/arka plan modu/.test(l)){const off=/(kapat|kapa|durdur)/.test(l);store.set('bgOff',off);return off?'Arka plan modunu kapattım. WhatsApp ekranda açılacak.':'Arka plan modunu açtım.'}
+  if(NATIVE&&/arka plan modu/.test(l)){const off=/(kapat|kapa|durdur)/.test(l);store.set('bgOff',off);try{await bgClose()}catch(e){}return off?'Arka plan modunu kapattım. WhatsApp ekranda açılacak.':'Arka plan modunu açtım.'}
   if(NATIVE&&/(ekrana bak|ekranda ne var|ekranı (oku|yorumla|anlat)|bu ne\b|bunu yorumla|şuna bak|bu görsel|bu resim|bu fotoğraf)/.test(l))return await lookScreen(t)
   if(/haber/.test(l)&&/(bak|oku|neler|son|ver|anlat|göster)/.test(l)){const n=await newsNow();if(n)return n}
   if(siteOpen&&/kapat|gizle|geri dön|çık/.test(l)){closeSite();return''}
@@ -291,6 +291,7 @@ const YESW=/(^|\s)(evet|eet|he\b|hı\b|hıhı|tamam\w*|olur\w*|olabilir|olsun|ya
 async function yesNo(l){l=String(l||'').toLowerCase().trim();if(NOW.test(l))return false;if(YESW.test(l))return true;
   if(!offline()){try{const r=JSON.parse(jx(await llmJson('Kullanıcının cevabı bir soruya onay mı ret mi? Sadece {"c":"evet"} veya {"c":"hayir"} veya {"c":"belirsiz"} döndür.','Cevap: '+l)));if(r.c==='evet')return true;if(r.c==='hayir')return false}catch(e){}}
   return null}
+setTimeout(async()=>{try{if(await szOn())await bgClose()}catch(e){}},7000);
 function queueTask(t){const q=store.get('queue',[]);q.push(t);store.set('queue',q);srvStat()}
 async function syncQueue(){const q=store.get('queue',[]);if(!q.length||!srvOn()||offline())return;try{await srvCall('/tasks',{tasks:q});store.set('queue',[]);srvStat();log('s',q.length+' bekleyen görev sunucuya gönderildi, başlıyor.');return q.length}catch(e){log('s','Görevler gönderilemedi: '+e.message)}}
 async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);let r=o.reply||'';if(o.ms)log('s','sunucu '+(o.ms/1000).toFixed(1)+'s'+(o.engine?' · '+o.engine:'')+(o.hata?' · uyarı: '+o.hata:''));if(NATIVE&&o.actions&&o.actions.length){const rs=await runActs(o.actions);if(rs&&(!r||/Yapamadım|yok|izin|Hangisi|Birden fazla/i.test(rs)))r+=(r?' ':'')+rs}return r||'Tamam.'}
@@ -581,15 +582,15 @@ async function szAct(o){const dd=SZ.disp?'-d '+SZ.disp+' ':'';
   }return null}
 async function act2(o){const J=PL('JarvisView');if(SZ.src&&SZ.ok){try{const r=await szAct(o);if(r)return r}catch(e){}}return await J.act(o)}
 async function scr(){if(await szOn()){try{const d=await szDump();if(d){SZ.nodes=d.n;SZ.src=true;return{pkg:d.pkg,n:d.n}}}catch(e){}}SZ.src=false;try{const r=await PL('JarvisView').screen();return JSON.parse(r.nodes||'{"pkg":"","n":[]}')}catch(e){return{pkg:'',n:[]}}}
-async function bgOpen(){try{const ids=async()=>{const x=await sh("dumpsys display | grep -o 'mDisplayId=[0-9]*' | sort -u");return(x.out||'').match(/\d+/g)||[]};const b=await ids();await sh('settings put global overlay_display_devices "720x1280/240"');for(let i=0;i<6;i++){await sleep(700);const a=(await ids()).filter(x=>!b.includes(x));if(a.length)return a[0]}}catch(e){}return 0}
-async function bgClose(){SZ.disp=0;try{await sh('settings put global overlay_display_devices ""')}catch(e){}}
+async function bgOpen(){try{const ids=async()=>{const x=await sh("dumpsys display | grep -o 'mDisplayId=[0-9]*' | sort -u");return(x.out||'').match(/\d+/g)||[]};const b=await ids();await sh('settings put global overlay_display_devices "720x1280/240,own_content_only"');clearTimeout(bgTimer);bgTimer=setTimeout(bgClose,40000);for(let i=0;i<6;i++){await sleep(700);const a=(await ids()).filter(x=>!b.includes(x));if(a.length)return a[0]}}catch(e){}return 0}
+let bgTimer=0;async function bgClose(){clearTimeout(bgTimer);SZ.disp=0;try{await sh('settings put global overlay_display_devices ""')}catch(e){}}
 async function waBg(n,text){if(!text||store.get('bgOff',false)||!await szOn())return false;const id=await bgOpen();if(!id){await bgClose();return false}
   try{SZ.disp=id;await sh('am start --display '+id+' -a android.intent.action.VIEW -p com.whatsapp -d '+shq('https://wa.me/'+n+'?text='+encodeURIComponent(text)));await sleep(2500);
     for(let i=0;i<8;i++){const d=await szDump().catch(()=>null);const s=d&&d.n.find(x=>/^(gönder|send)$/i.test(x.t)&&x.c);if(s){SZ.nodes=d.n;await szAct({a:'click',idx:s.i});await sleep(1500);await bgClose();return true}await sleep(900)}}catch(e){}
   await bgClose();return false}
 async function szBgTest(){let L=[];try{if(!await szOn())return'Shizuku hazır değil.';
   const ids=async()=>{const x=await sh("dumpsys display | grep -o 'mDisplayId=[0-9]*' | sort -u");return(x.out||'').match(/\d+/g)||[]};
-  const b=await ids();await sh('settings put global overlay_display_devices "720x1280/240"');await sleep(2500);const a=await ids();const nw=a.filter(x=>!b.includes(x));
+  const b=await ids();await sh('settings put global overlay_display_devices "720x1280/240,own_content_only"');await sleep(2500);const a=await ids();const nw=a.filter(x=>!b.includes(x));
   L.push('ekran: '+(nw.length?'yeni #'+nw[0]:'açılmadı'));
   if(nw.length){const id=nw[0];await sh('am start --display '+id+' -a android.intent.action.VIEW -d https://www.google.com');await sleep(3500);
     const x=await sh('uiautomator dump --display '+id+' /data/local/tmp/jv2.xml 2>&1; head -c 200 /data/local/tmp/jv2.xml');
