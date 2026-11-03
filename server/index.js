@@ -19,6 +19,9 @@ const OAI_KEY = ENV.OPENAI_API_KEY || '';
 const OAI_MODEL = ENV.OPENAI_MODEL || 'gpt-6-luna';
 const OAI_BASE = ENV.OPENAI_BASE || 'https://api.openai.com/v1';
 const DEEP_MODEL = ENV.DEEPSEEK_MODEL || 'deepseek-chat';
+const EVREN_KEY = ENV.EVREN_API_KEY || '';
+const EVREN_MODEL = ENV.EVREN_MODEL || 'deepseek-v4.1-flash';
+const EVREN_BASE = ENV.EVREN_BASE || 'https://evren-llmapi.ssyz.org.tr/v1';
 
 const pool = globalThis.__POOL || new pg.Pool({ connectionString: ENV.DATABASE_URL });
 const q = (sql, p) => pool.query(sql, p);
@@ -289,16 +292,16 @@ async function geminiLoop(text, history, ctx) {
 }
 
 const lowerTypes = o => Array.isArray(o) ? o.map(lowerTypes) : (o && typeof o === 'object') ? Object.fromEntries(Object.entries(o).map(([k, v]) => [k, k === 'type' && typeof v === 'string' ? v.toLowerCase() : lowerTypes(v)])) : o;
-async function oaiLoop(text, history, ctx, base, key, model, label) {
+async function oaiLoop(text, history, ctx, base, key, model, label, tmo) {
   const tools = TOOLS.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: lowerTypes(t.parameters) } }));
   const msgs = [{ role: 'system', content: SYS + (ctx.mem ? '\nHafıza:\n' + ctx.mem : '') }, ...history.filter(h => h && h.t).map(h => ({ role: h.r === 'u' ? 'user' : 'assistant', content: h.t })), { role: 'user', content: text }];
   for (let step = 0; step < 6; step++) {
-    const r = await fetch(`${base}/chat/completions`, { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: msgs, tools }) });
+    const r = await fetch(`${base}/chat/completions`, { method: 'POST', headers: { Authorization: 'Bearer ' + key, 'content-type': 'application/json' }, body: JSON.stringify({ model, messages: msgs, tools }), signal: AbortSignal.timeout(tmo || 60000) });
     if (!r.ok) throw new Error(label + ' ' + r.status + ' ' + (await r.text()).slice(0, 120));
     const m = (await r.json()).choices?.[0]?.message;
     if (!m) throw new Error(label + ' boş cevap');
     if (!m.tool_calls || !m.tool_calls.length) { ctx.engine = label + ' · ' + model; return (m.content || '').trim() || 'Bir şey diyemedim.'; }
-    msgs.push({ role: 'assistant', content: m.content || '', tool_calls: m.tool_calls });
+    msgs.push({ role: 'assistant', content: m.content || '', tool_calls: m.tool_calls, ...(m.reasoning_content ? { reasoning_content: m.reasoning_content } : {}) });
     for (const c of m.tool_calls) {
       let out; try { ctx.used = true; out = await runTool(c.function.name, JSON.parse(c.function.arguments || '{}'), ctx); } catch (e) { out = { hata: String(e.message || e) }; }
       msgs.push({ role: 'tool', tool_call_id: c.id, content: JSON.stringify(out) });
@@ -347,13 +350,14 @@ async function think(text, history, opts = {}) {
   ctx.mem = 'ŞİMDİ (Türkiye saati): ' + new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).slice(0, 16).replace(' ', 'T') + ' (' + trTime(new Date()) + ')\n' + ctx.mem;
   let reply, err = '';
   const sira = [];
+  if (EVREN_KEY) sira.push(['evren', () => oaiLoop(text, history, ctx, EVREN_BASE, EVREN_KEY, EVREN_MODEL, 'EVREN', 25000)]);
   if (ANTH_KEY) sira.push(['claude', () => claudeLoop(text, history, ctx)]);
   if (OAI_KEY) sira.push(['openai', () => oaiLoop(text, history, ctx, OAI_BASE, OAI_KEY, OAI_MODEL, 'OpenAI')]);
   if (DEEP_KEY) sira.push(['deepseek', () => deepLoop(text, history, ctx)]);
   for (const [ad, f] of sira) {
     if (reply !== undefined || ctx.used) break;
     if ((cool[ad] || 0) > Date.now()) continue;
-    try { reply = await f(); } catch (e) { const m = String(e.message || e); err += (err ? ' | ' : '') + m; if (/ (401|402|403|429) |credit|quota|insufficient/i.test(m + ' ')) cool[ad] = Date.now() + 10 * 60000; }
+    try { reply = await f(); } catch (e) { const m = String(e.message || e); err += (err ? ' | ' : '') + m; if (/ (401|402|403|429) |credit|quota|insufficient/i.test(m + ' ')) cool[ad] = Date.now() + 10 * 60000; else if (ad === 'evren') cool[ad] = Date.now() + 3 * 60000; }
   }
   if (reply === undefined && !ctx.used && GEMINI_KEY) { try { reply = await geminiLoop(text, history, ctx); ctx.engine = 'Gemini'; } catch (e) { err += ' | ' + String(e.message || e); } }
   if (reply === undefined && !ctx.used && DEEP_KEY) { try { reply = await deepFallback(text, history); } catch (e) { err += ' | ' + String(e.message || e); } }
@@ -384,7 +388,7 @@ const auth = (req, res, next) => {
   if (h === 'Bearer ' + TOKEN) return next();
   res.status(401).json({ error: 'yetkisiz' });
 };
-app.get('/health', (req, res) => res.json({ ok: true, ver: 'g10', gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, claude: !!ANTH_KEY, openai: !!OAI_KEY, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
+app.get('/health', (req, res) => res.json({ ok: true, ver: 'g11', evren: !!EVREN_KEY, gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, claude: !!ANTH_KEY, openai: !!OAI_KEY, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
 
 app.post('/chat', auth, async (req, res) => {
   try {
