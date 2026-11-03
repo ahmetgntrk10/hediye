@@ -284,7 +284,7 @@ async function runActs(list){const acts=[...list.filter(a=>QUIET.has(a.t)),...li
   finally{store.set('rest',[]);actsRunning=false}return out}
 async function resumeActs(){if(actsRunning)return;const r=store.get('rest',[]);if(!r||!r.length)return;log('s','Yarım kalan '+r.length+' iş devam ediyor.');const rs=await runActs(r);if(rs){log('j',rs);if(!MINI&&!busy)say(rs)}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)setTimeout(resumeActs,1200)});
-setInterval(async()=>{try{if(offline()||busy||!NATIVE||pend)return;const q=store.get('qlocal',[]);if(!q.length)return;const x=q.shift();store.set('qlocal',q);pend={t:'confirm',fn:()=>local(x)};const m='İnternet geldi. Bekleyen iş: '+x+'. Yapayım mı? Evet de.';log('j',m);if(!MINI)await say(m)}catch(e){}},20000);
+setInterval(async()=>{try{if(offline()||busy||!NATIVE||pend)return;const q=store.get('qlocal',[]);if(!q.length)return;const x=q.shift();store.set('qlocal',q);pend={t:'confirm',loose:true,fn:()=>local(x)};const m='İnternet geldi. Bekleyen iş: '+x+'. Yapayım mı? Evet de.';log('j',m);if(!MINI)await say(m)}catch(e){}},20000);
 function queueTask(t){const q=store.get('queue',[]);q.push(t);store.set('queue',q);srvStat()}
 async function syncQueue(){const q=store.get('queue',[]);if(!q.length||!srvOn()||offline())return;try{await srvCall('/tasks',{tasks:q});store.set('queue',[]);srvStat();log('s',q.length+' bekleyen görev sunucuya gönderildi, başlıyor.');return q.length}catch(e){log('s','Görevler gönderilemedi: '+e.message)}}
 async function srvChat(text){const o=await srvCall('/chat',{text,history:hist.slice(-8).map(x=>({r:x.r,t:x.t}))});srvPend=!!(o.approvals&&o.approvals.length);let r=o.reply||'';if(o.ms)log('s','sunucu '+(o.ms/1000).toFixed(1)+'s'+(o.engine?' · '+o.engine:'')+(o.hata?' · uyarı: '+o.hata:''));if(NATIVE&&o.actions&&o.actions.length){const rs=await runActs(o.actions);if(rs&&(!r||/Yapamadım|yok|izin|Hangisi|Birden fazla/i.test(rs)))r+=(r?' ':'')+rs}return r||'Tamam.'}
@@ -328,7 +328,7 @@ async function run(text){
     if(r===''){clearInterval(iv);busy=false;setState('idle');if(conv||S.always)setTimeout(listenOnce,250);return}
     if(r){log('j',r);hist.push({r:'u',t:text},{r:'a',t:r});if(srvOn()&&!offline())srvCall('/log',{u:text,a:r}).catch(()=>{});busy=false;await say(r);return}
     if(offline()&&NATIVE){if(srvOn()&&TASKRX.test(text)){queueTask(text);clearInterval(iv);busy=false;hist.push({r:'u',t:text},{r:'a',t:'Kaydettim.'});const m='İnternet yok. Bu işi kaydettim, internet gelince ben demeden arka planda yapacağım. Önemli bir şey çıkarsa önce sana soracağım.';log('j',m);await say(m);return}
-      if(true){clearInterval(iv);busy=false;let m3;if(/önemli|unutma|sıraya|listeye|bekleyen/i.test(text)){const q=store.get('qlocal',[]);q.push(text);store.set('qlocal',q);m3='İnternet yok. Bekleyen listeye aldım, internet gelince sana soracağım.'}else{pend={t:'confirm',fn:()=>{const q=store.get('qlocal',[]);q.push(text);store.set('qlocal',q);return 'Listeye aldım. İnternet gelince sana soracağım.'}};m3='İnternet yok. Bunu bekleyen listeye alayım mı? Evet de.'}log('j',m3);hist.push({r:'u',t:text},{r:'a',t:m3});await say(m3);return}
+      if(true){clearInterval(iv);busy=false;let m3;if(/önemli|unutma|sıraya|listeye|bekleyen/i.test(text)){const q=store.get('qlocal',[]);q.push(text);store.set('qlocal',q);m3='İnternet yok. Bekleyen listeye aldım, internet gelince sana soracağım.'}else{pend={t:'confirm',loose:true,fn:()=>{const q=store.get('qlocal',[]);q.push(text);store.set('qlocal',q);return 'Listeye aldım. İnternet gelince sana soracağım.'}};m3='İnternet yok. Bunu bekleyen listeye alayım mı? Evet de.'}log('j',m3);hist.push({r:'u',t:text},{r:'a',t:m3});await say(m3);return}
       clearInterval(iv);busy=false;const m2='İnternet yok, bunu şu an yapamıyorum. İnternetsiz sadece telefon işlerini yaparım.';log('j',m2);await say(m2);return}
     if(!CAMRX.test(text)){const sv=await srvRoute(text);if(sv!==null){hist.push({r:'u',t:text},{r:'a',t:sv});log('j',sv);clearInterval(iv);busy=false;await say(sv);return}}
     let img=null;if(CAMRX.test(text)){if(camOn)img=grab();else{try{img=await quickShot()}catch(e){throw new Error('Kamera açılamadı. Kamera izni var mı?')}}}
@@ -646,7 +646,7 @@ function waName(l){return l.replace(/['’]/g,'').split(/\s+/).filter(w=>w&&!/^(
 async function phoneCmd(l,t){const J=PL('JarvisView');let m;
   if(pend){const P=pend;pend=null;
     if(/^(vazgeç|iptal|hayır|yok|boşver|gönderme|durdur)/.test(l))return'Tamam, iptal.';
-    if(P.t==='confirm'){if(/^(evet|tamam|ara|onay|aynen|olur|al\b|ekle|koy)/.test(l))return await P.fn();return'Tamam, yapmadım.'}
+    if(P.t==='confirm'){if(P.loose?!/^(hayır|hayir|yok|vazgeç|vazgec|istemiyorum|dur\b|durdur|iptal|olmaz|gerek yok|boşver|bosver|değil)/.test(l):/^(evet|tamam|ara|onay|aynen|olur|al\b|ekle|koy)/.test(l))return await P.fn();return'Tamam, yapmadım.'}
     if(P.t==='pick'){const w={birinci:1,ilk:1,ikinci:2,üçüncü:3,dördüncü:4,beşinci:5},n=parseInt((l.match(/\d+/)||[])[0])||w[l.split(' ')[0]]||0,c=P.list[n-1];if(!c){pend=P;return'Hangisi? Numarasını söyle.'}
       if(P.then==='call')return await dialNow(c);if(P.then==='sms')return await smsFlow(c,P.text);if(P.then==='wa')return await waOpen(c,P.text)}
     if(P.t==='waText')return await actWa(P.name,t);
