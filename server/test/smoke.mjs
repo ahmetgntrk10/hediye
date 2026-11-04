@@ -31,6 +31,25 @@ const mock = http.createServer((req, res) => {
   });
 });
 await new Promise(r => mock.listen(0, r)); const port = mock.address().port;
+const { WebSocketServer, WebSocket } = await import('ws');
+const liveSeen = { outputs: [] };
+const upWss = new WebSocketServer({ port: 0 }); await new Promise(r => upWss.on('listening', r));
+upWss.on('connection', c => {
+  c.send(JSON.stringify({ type: 'session.created' }));
+  let sent = false;
+  c.on('message', raw => { const m = JSON.parse(raw.toString());
+    if (m.type === 'session.update') { liveSeen.tools = (m.session.tools || []).length; liveSeen.voice = m.session.voice; c.send(JSON.stringify({ type: 'session.updated' })); }
+    if (m.type === 'input_audio_buffer.append' && !sent) { sent = true;
+      c.send(JSON.stringify({ type: 'conversation.item.input_audio_transcription.completed', transcript: 'not al' }));
+      c.send(JSON.stringify({ type: 'response.function_call_arguments.done', name: 'add_note', call_id: 'cx', arguments: '{"text":"canli not"}' })); }
+    if (m.type === 'conversation.item.create') liveSeen.outputs.push(m.item);
+    if (m.type === 'response.create') {
+      c.send(JSON.stringify({ type: 'response.audio.delta', delta: Buffer.from([1, 2, 3, 4]).toString('base64') }));
+      c.send(JSON.stringify({ type: 'response.audio_transcript.done', transcript: 'Notu aldım.' }));
+      c.send(JSON.stringify({ type: 'response.done' })); }
+  });
+});
+process.env.DASHSCOPE_API_KEY = 'k'; process.env.DASHSCOPE_WS = `ws://127.0.0.1:${upWss.address().port}/api-ws/v1/realtime`;
 Object.assign(process.env, { JARVIS_TOKEN: 'x'.repeat(24), GEMINI_API_KEY: 'k', DEEPSEEK_API_KEY: 'k', ANTHROPIC_API_KEY: 'k', ANTHROPIC_BASE: `http://127.0.0.1:${port}/anthropic`, DEEPSEEK_BASE: `http://127.0.0.1:${port}/deepseek`, GEMINI_BASE: `http://127.0.0.1:${port}`, EMAIL_ACCOUNTS: 'a@x.com,b@x.com', N8N_WEBHOOK_URL: `http://127.0.0.1:${port}/n8n`, PORT: '3111' });
 await import('../index.js');
 const H = { 'content-type': 'application/json', authorization: 'Bearer ' + 'x'.repeat(24) };
@@ -57,6 +76,12 @@ const fail=[];
 if(!(alarm[1].actions&&alarm[1].actions.length===1&&alarm[1].actions[0].t==='alarm'))fail.push('phone_action calismadi');
 const rl=await (await fetch('http://127.0.0.1:3111/reminders/due',{headers:H})).json();
 const chk=(c,m)=>{if(!c)fail.push(m)};
+const liveRes = await new Promise(resolve => { const got = { bin: 0, user: '', asst: '', ready: false }; const w = new WebSocket('ws://127.0.0.1:3111/live'); const to = setTimeout(() => { try { w.close(); } catch (e) {} resolve(got); }, 5000);
+  w.on('error', () => {});
+  w.on('open', () => w.send(JSON.stringify({ type: 'auth', token: 'x'.repeat(24), voice: 'Ethan' })));
+  w.on('message', (d, bin) => { if (bin) { got.bin += d.length; return; } const m = JSON.parse(d.toString()); if (m.type === 'ready') { got.ready = true; w.send(Buffer.from([0, 0, 0, 0]), { binary: true }); } if (m.type === 'user') got.user = m.text; if (m.type === 'assistant') got.asst = m.text; if (m.type === 'done') { clearTimeout(to); w.close(); resolve(got); } }); });
+console.log('canli', JSON.stringify(liveRes), JSON.stringify(liveSeen));
+chk(liveRes.ready && liveRes.bin === 4 && liveRes.asst === 'Notu aldım.' && liveRes.user === 'not al' && liveSeen.voice === 'Ethan' && liveSeen.outputs.length === 1 && /tamam/.test(liveSeen.outputs[0].output || ''), 'canli mod calismadi');
 chk(cl[1].reply==='Claude tamam'&&/Claude/.test(cl[1].engine),'claude dongusu calismadi');
 chk(rem[1].reply&&!/ulaşamadım/.test(rem[1].reply),'hatirlatici cevabi yok');
 chk(Array.isArray(rl)&&rl.length===0,'hatirlatici erken geldi');

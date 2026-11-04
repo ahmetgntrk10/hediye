@@ -1,5 +1,6 @@
 import express from 'express';
 import pg from 'pg';
+import { WebSocketServer, WebSocket } from 'ws';
 
 const ENV = process.env;
 const TOKEN = ENV.JARVIS_TOKEN;
@@ -19,6 +20,10 @@ const OAI_KEY = ENV.OPENAI_API_KEY || '';
 const OAI_MODEL = ENV.OPENAI_MODEL || 'gpt-6-luna';
 const OAI_BASE = ENV.OPENAI_BASE || 'https://api.openai.com/v1';
 const DEEP_MODEL = ENV.DEEPSEEK_MODEL || 'deepseek-chat';
+const LIVE_KEY = ENV.DASHSCOPE_API_KEY || '';
+const LIVE_WS = ENV.DASHSCOPE_WS || 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime';
+const LIVE_MODEL = ENV.LIVE_MODEL || 'qwen3.8-omni-flash-realtime';
+const LIVE_VOICE = ENV.LIVE_VOICE || 'Tina';
 const EVREN_KEY = ENV.EVREN_API_KEY || '';
 const EVREN_MODEL = ENV.EVREN_MODEL || 'deepseek-v4.1-flash';
 const EVREN_BASE = ENV.EVREN_BASE || 'https://evren-llmapi.ssyz.org.tr/v1';
@@ -342,12 +347,16 @@ async function deepFallback(text, history) {
 }
 
 const cool = {};
-async function think(text, history, opts = {}) {
-  const ctx = { approvals: [], actions: [], taskId: opts.taskId, mem: '' };
+async function makeCtx(taskId) {
+  const ctx = { approvals: [], actions: [], taskId, mem: '' };
   try { const m = await q('select text from memories order by id desc limit 15'); ctx.mem = m.rows.map(x => '- ' + x.text).join('\n'); } catch (e) {}
   try { const c = await q('select role,text,created_at from chat_log order by id desc limit 30'); ctx.mem += (ctx.mem ? '\n' : '') + 'SON OLAYLAR (yeniden eskiye):\n' + c.rows.map(fmtLog).join('\n'); } catch (e) {}
   try { const hp = await q(`select id,text,due_at from reminders where status='pending' order by due_at limit 10`); if (hp.rows.length) ctx.mem += '\nBEKLEYEN HATIRLATICILAR:\n' + hp.rows.map(x => `#${x.id} ${trTime(x.due_at)}: ${x.text}`).join('\n'); } catch (e) {}
   ctx.mem = 'ŞİMDİ (Türkiye saati): ' + new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul' }).slice(0, 16).replace(' ', 'T') + ' (' + trTime(new Date()) + ')\n' + ctx.mem;
+  return ctx;
+}
+async function think(text, history, opts = {}) {
+  const ctx = await makeCtx(opts.taskId);
   let reply, err = '';
   const sira = [];
   if (EVREN_KEY) sira.push(['evren', () => oaiLoop(text, history, ctx, EVREN_BASE, EVREN_KEY, EVREN_MODEL, 'EVREN', 25000)]);
@@ -388,7 +397,7 @@ const auth = (req, res, next) => {
   if (h === 'Bearer ' + TOKEN) return next();
   res.status(401).json({ error: 'yetkisiz' });
 };
-app.get('/health', (req, res) => res.json({ ok: true, ver: 'g11', evren: !!EVREN_KEY, gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, claude: !!ANTH_KEY, openai: !!OAI_KEY, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
+app.get('/health', (req, res) => res.json({ ok: true, ver: 'g12', canli: !!LIVE_KEY, evren: !!EVREN_KEY, gemini: !!GEMINI_KEY, deepseek: !!DEEP_KEY, n8n: !!N8N_URL, hesaplar: ACCOUNTS.length, claude: !!ANTH_KEY, openai: !!OAI_KEY, ntfy: !!(NTFY_URL && NTFY_TOPIC), izleme: !!(CD_URL && CD_KEY) }));
 
 app.post('/chat', auth, async (req, res) => {
   try {
@@ -512,9 +521,77 @@ async function worker() {
   busy = false;
 }
 
+/* ---------- canlı ses (Qwen realtime, sunucu köprüsü) ---------- */
+const LIVE_SYS_ADD = `\nCANLI SESLİ KONUŞMA: Şu an sesli konuşuyorsun. Çok kısa konuş (en fazla 2 kısa cümle). "Ah", "hmm", "şey" gibi dolgu sesleri çıkarma, sakin ve doğal konuş. Kullanıcı sözünü keserse hemen sus. Bir taslak onaylanırsa (kullanıcı evet/tamam/gönder derse) onay_ver aracını evet=true ile, vazgeçerse evet=false ile çağır.`;
+const LIVE_EXTRA_TOOL = { name: 'onay_ver', description: 'Bekleyen onayı (örn. e-posta taslağı) kullanıcının cevabına göre onaylar ya da reddeder.', parameters: { type: 'OBJECT', properties: { evet: { type: 'BOOLEAN' } }, required: ['evet'] } };
+async function liveApprove(args) {
+  const pend = await latestPending();
+  if (!pend) return { hata: 'Bekleyen onay yok' };
+  const o = await decide(pend.id, !!args.evet);
+  return { sonuc: o.msg };
+}
+function liveSession(ws) {
+  let up = null, ready = false, ctx = null, authed = false, cfg = {};
+  const send = o => { try { if (ws.readyState === 1) ws.send(JSON.stringify(o)); } catch (e) {} };
+  const upSend = o => { if (up && up.readyState === 1) up.send(JSON.stringify(o)); };
+  const close = () => { try { up && up.close(); } catch (e) {} try { ws.close(); } catch (e) {} };
+  const logc = (role, text) => q('insert into chat_log(role,text) values($1,$2)', [role, String(text).slice(0, 500)]).catch(() => {});
+  async function start() {
+    if (!LIVE_KEY) { send({ type: 'error', msg: 'Canlı mod için sunucuda DASHSCOPE_API_KEY yok.' }); return close(); }
+    ctx = await makeCtx();
+    up = new WebSocket(`${LIVE_WS}${LIVE_WS.includes('?') ? '&' : '?'}model=${encodeURIComponent(LIVE_MODEL)}`, { headers: { Authorization: 'Bearer ' + LIVE_KEY } });
+    up.on('error', e => { send({ type: 'error', msg: 'Canlı bağlantı hatası: ' + String(e.message || e).slice(0, 100) }); close(); });
+    up.on('close', () => { send({ type: 'closed' }); try { ws.close(); } catch (e) {} });
+    up.on('message', async raw => {
+      let m; try { m = JSON.parse(raw.toString()); } catch (e) { return; }
+      try {
+        if (m.type === 'session.created') {
+          const tools = [...TOOLS, LIVE_EXTRA_TOOL].map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: lowerTypes(t.parameters) } }));
+          upSend({ type: 'session.update', session: { modalities: ['text', 'audio'], voice: cfg.voice || LIVE_VOICE, input_audio_format: 'pcm', output_audio_format: 'pcm', instructions: SYS + LIVE_SYS_ADD + (ctx.mem ? '\nHafıza:\n' + ctx.mem : ''), turn_detection: { type: ENV.LIVE_VAD || 'server_vad', threshold: 0.6, silence_duration_ms: 700 }, tools } });
+        } else if (m.type === 'session.updated') {
+          if (!ready) { ready = true; send({ type: 'ready', voice: cfg.voice || LIVE_VOICE }); }
+        } else if (m.type === 'response.audio.delta' || m.type === 'response.output_audio.delta') {
+          if (m.delta && ws.readyState === 1) ws.send(Buffer.from(m.delta, 'base64'), { binary: true });
+        } else if (m.type === 'input_audio_buffer.speech_started') {
+          send({ type: 'interrupt' });
+        } else if (m.type === 'conversation.item.input_audio_transcription.completed') {
+          if (m.transcript) { send({ type: 'user', text: m.transcript }); logc('u', m.transcript); }
+        } else if (m.type === 'response.audio_transcript.done') {
+          if (m.transcript) { send({ type: 'assistant', text: m.transcript }); logc('a', m.transcript); }
+        } else if (m.type === 'response.function_call_arguments.done') {
+          let args = {}; try { args = JSON.parse(m.arguments || '{}'); } catch (e) {}
+          let out;
+          try { out = m.name === 'onay_ver' ? await liveApprove(args) : await runTool(m.name, args, ctx); } catch (e) { out = { hata: String(e.message || e) }; }
+          if (ctx.actions.length) { const acts = ctx.actions.splice(0); send({ type: 'actions', actions: acts }); for (const a of acts) logc('s', `${a.t} ${a.name || a.app || a.q || ''}${a.text ? ': ' + a.text : ''}`.trim()); }
+          upSend({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: m.call_id, output: JSON.stringify(out) } });
+          upSend({ type: 'response.create' });
+        } else if (m.type === 'response.done') {
+          send({ type: 'done' });
+        } else if (m.type === 'error') {
+          send({ type: 'error', msg: String(m.error?.message || 'hata').slice(0, 160) });
+        }
+      } catch (e) { send({ type: 'error', msg: String(e.message || e).slice(0, 120) }); }
+    });
+  }
+  ws.on('message', (data, isBinary) => {
+    if (isBinary) { if (ready) upSend({ type: 'input_audio_buffer.append', audio: Buffer.from(data).toString('base64') }); return; }
+    let m; try { m = JSON.parse(data.toString()); } catch (e) { return; }
+    if (m.type === 'auth') {
+      if (m.token !== TOKEN) { send({ type: 'error', msg: 'yetkisiz' }); return close(); }
+      authed = true; cfg = { voice: String(m.voice || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) };
+      start().catch(e => { send({ type: 'error', msg: String(e.message || e).slice(0, 120) }); close(); });
+    } else if (!authed) return;
+    else if (m.type === 'stop') close();
+    else if (m.type === 'cancel') upSend({ type: 'response.cancel' });
+  });
+  ws.on('close', () => { try { up && up.close(); } catch (e) {} });
+}
+
 await init();
 const PORT = +ENV.PORT || 3000;
-app.listen(PORT, () => console.log('Jarvis sunucusu hazır :' + PORT));
+const httpServer = app.listen(PORT, () => console.log('Jarvis sunucusu hazır :' + PORT));
+const liveWss = new WebSocketServer({ noServer: true });
+httpServer.on('upgrade', (req, sock, head) => { if (!String(req.url || '').startsWith('/live')) { sock.destroy(); return; } liveWss.handleUpgrade(req, sock, head, w => liveSession(w)); });
 setInterval(worker, 5000);
 setInterval(remindWorker, 8000);
 setInterval(classifyWorker, 30000);
