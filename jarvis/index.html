@@ -50,7 +50,7 @@ body.mini #mini{display:block;position:fixed;left:10px;right:10px;bottom:12px;he
 <body>
 <canvas id="orb"></canvas>
 <div id="cam"><video id="vid" playsinline muted></video><canvas id="ov"></canvas></div>
-<div id="top"><span id="state">hazır değil</span><span style="display:flex;gap:6px"><button class="btn" id="bClose" style="display:none">kapat ✕</button><button class="btn" id="bMic">dinle</button><button class="btn" id="bSet">ayar</button></span></div>
+<div id="top"><span id="state">hazır değil</span><span style="display:flex;gap:6px"><button class="btn" id="bClose" style="display:none">kapat ✕</button><button class="btn" id="bLive">canlı</button><button class="btn" id="bMic">dinle</button><button class="btn" id="bSet">ayar</button></span></div>
 <div id="msg"></div>
 <div id="log"></div>
 <div id="mini"><div id="mu"></div><div id="mj"></div></div>
@@ -70,6 +70,7 @@ body.mini #mini{display:block;position:fixed;left:10px;right:10px;bottom:12px;he
 <input type="hidden" id="kP">
 <label>Jarvis sunucusu adresi</label><input type="text" id="sU" autocomplete="off" placeholder="https://jarvis.gnturk.com">
 <label>Sunucu şifresi (JARVIS_TOKEN)</label><input type="password" id="sT" autocomplete="off">
+<label>Canlı mod ses adı (boş bırakırsan varsayılan)</label><input type="text" id="lv" autocomplete="off" placeholder="örn. Ethan">
 <small id="sSt"></small>
 <div class="sw"><span>Başka ekrandayken "Hey asistan" deyince panel aç</span><input type="checkbox" id="wake"></div>
 <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="bOv" style="flex:1">üstte göster izni</button><button class="btn" id="bBat" style="flex:1">pil izni</button></div>
@@ -155,7 +156,7 @@ async function listenNative(){const SN=PL('SpeechRecognition');if(recOn||speakin
   recOn=false;if(enrolling)return;if(t){emptyN=0;lastAct=Date.now();handleSpeech(t)}else{setState('idle');if(MINI&&++emptyN>=4){closePanel();return}if((conv||S.always)&&!speaking&&!busy)setTimeout(listenOnce,350)}}
 let enrolling=false;
 function listenOnce(){
-  if(bgOff||enrolling)return;
+  if(bgOff||enrolling||liveOn)return;
   if(NATIVE&&PL('SpeechRecognition'))return listenNative();
   if(!SR){msg('Bu tarayıcıda ses tanıma yok. Yazarak kullan.');return}
   if(recOn||speaking)return;
@@ -176,6 +177,57 @@ function handleSpeech(t){
   awakeUntil=Date.now()+(S.always?0:0);
   queueSpeech(t);
 }
+let liveOn=false,LV=null;
+const LV_WORKLET="class P extends AudioWorkletProcessor{process(i){const c=i[0]&&i[0][0];if(c)this.port.postMessage(new Float32Array(c));return true}}registerProcessor('pcm-cap',P)";
+async function startLive(){
+  if(LV||liveOn)return'Canlı mod zaten açık.';
+  if(!srvOn())return'Canlı mod için sunucu bağlı olmalı.';
+  if(offline())return'İnternet yok, canlı mod açılamaz.';
+  liveOn=true;conv=false;stopRec();stopSpeech();setConv();
+  try{PL('JarvisView').wakePause({on:true})}catch(e){}
+  const L={ws:null,stream:null,cap:null,play:null,node:null,src:[],next:0,buf:[],bn:0,last:Date.now(),idle:null,ready:false};LV=L;
+  try{
+    L.stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:1}});
+    L.cap=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});
+    await L.cap.audioWorklet.addModule(URL.createObjectURL(new Blob([LV_WORKLET],{type:'application/javascript'})));
+    const so=L.cap.createMediaStreamSource(L.stream);L.node=new AudioWorkletNode(L.cap,'pcm-cap');so.connect(L.node);
+    L.play=new (window.AudioContext||window.webkitAudioContext)({sampleRate:24000});
+    const rate=L.cap.sampleRate;
+    L.node.port.onmessage=e=>{if(!L.ready||!L.ws||L.ws.readyState!==1)return;L.buf.push(e.data);L.bn+=e.data.length;if(L.bn>=rate*0.1){const f=new Float32Array(L.bn);let k=0;for(const b of L.buf){f.set(b,k);k+=b.length}L.buf=[];L.bn=0;const n=Math.floor(f.length*16000/rate),o=new Int16Array(n);for(let i=0;i<n;i++){const v=Math.max(-1,Math.min(1,f[Math.floor(i*rate/16000)]));o[i]=v<0?v*32768:v*32767}L.ws.send(o.buffer)}};
+    const url=S.sU.replace(/\/+$/,'').replace(/^http/,'ws')+'/live';
+    L.ws=new WebSocket(url);L.ws.binaryType='arraybuffer';
+    L.ws.onopen=()=>L.ws.send(JSON.stringify({type:'auth',token:S.sT,voice:store.get('lv','')}));
+    L.ws.onmessage=ev=>{
+      if(typeof ev.data!=='string'){L.last=Date.now();const i16=new Int16Array(ev.data);const f=new Float32Array(i16.length);for(let i=0;i<i16.length;i++)f[i]=i16[i]/32768;const ab=L.play.createBuffer(1,f.length,24000);ab.copyToChannel(f,0);const s=L.play.createBufferSource();s.buffer=ab;s.connect(L.play.destination);const t0=Math.max(L.play.currentTime+0.02,L.next);s.start(t0);L.next=t0+ab.duration;L.src.push(s);s.onended=()=>{L.src=L.src.filter(x=>x!==s)};setState('speak');return}
+      let m;try{m=JSON.parse(ev.data)}catch(e){return}
+      if(m.type==='ready'){L.ready=true;setState('listen','canlı · dinliyorum');L.play.resume&&L.play.resume()}
+      else if(m.type==='interrupt'){for(const s of L.src){try{s.stop()}catch(e){}}L.src=[];L.next=0;setState('listen','canlı · dinliyorum')}
+      else if(m.type==='user'){L.last=Date.now();log('u','› '+m.text);if(/(canlı mod\w* (kapat|bitir)|canlıdan çık|normal moda dön|görüşürüz)/i.test(m.text))setTimeout(()=>stopLive(),2500)}
+      else if(m.type==='assistant'){L.last=Date.now();log('j',m.text)}
+      else if(m.type==='actions'){runActs(m.actions).then(r=>{if(r)log('s',r)}).catch(()=>{})}
+      else if(m.type==='done'){setState('listen','canlı · dinliyorum')}
+      else if(m.type==='error'){log('s','Canlı mod: '+m.msg);if(!L.ready)stopLive()}
+      else if(m.type==='closed'){stopLive()}
+    };
+    L.ws.onerror=()=>{if(!L.ready)log('s','Canlı bağlantı kurulamadı.')};
+    L.ws.onclose=()=>stopLive();
+    L.idle=setInterval(()=>{if(Date.now()-L.last>120000){log('s','Canlı mod 2 dakika sessiz kaldı, kapandı.');stopLive()}},10000);
+    $('bLive').classList.add('on');$('bLive').textContent='canlı ●';
+    return'Canlı moddayım, konuşabilirsin.'
+  }catch(e){const m=String(e&&e.message||e);stopLive();return'Canlı mod açılamadı: '+m.slice(0,80)}
+}
+function stopLive(){
+  const L=LV;if(!L)return;LV=null;liveOn=false;
+  try{clearInterval(L.idle)}catch(e){}try{L.ws&&L.ws.readyState<=1&&(L.ws.send(JSON.stringify({type:'stop'})),L.ws.close())}catch(e){}
+  for(const s of L.src){try{s.stop()}catch(e){}}
+  try{L.stream&&L.stream.getTracks().forEach(t=>t.stop())}catch(e){}
+  try{L.cap&&L.cap.close()}catch(e){}try{L.play&&L.play.close()}catch(e){}
+  if(!MINI){try{PL('JarvisView').wakePause({on:false})}catch(e){}}
+  $('bLive').classList.remove('on');$('bLive').textContent='canlı';setState('idle');
+  setTimeout(()=>{if(started)applyListen()},500)
+}
+$('bLive').onclick=async()=>{if(!started)return;if(LV){stopLive();return}const r=await startLive();if(r)log('s',r)};
+$('lv').value=store.get('lv','');$('lv').onchange=()=>store.set('lv',$('lv').value.trim());
 let spBuf='',spT=null;
 function queueSpeech(t){spBuf=(spBuf+' '+t).trim();clearTimeout(spT);setState('listen');$('state').textContent='“'+spBuf.slice(-34)+'”';spT=setTimeout(()=>{const x=spBuf;spBuf='';if(x)run(x)},1800);setTimeout(()=>{if(!busy&&!speaking&&!recOn&&spBuf)listenOnce()},250)}
 function wakeUp(){awakeUntil=Date.now()+8000;pulse=1;say('Evet, buradayım.')}
@@ -204,6 +256,7 @@ async function local(t){
   if(/kamera(yı|yi)? (kapat|durdur)|el takibini kapat/.test(l)){stopCam();return 'Kamerayı kapattım.'}
   if(MINI&&/^(tamam|kapat|sağ ol|teşekkür|görüşürüz|yeter|bu kadar|hepsi bu)/.test(l)){setTimeout(closePanel,200);return''}
   if(lastVis&&/(google\w*\s*(da|de)?\s*(arat|ara)|aratsana|araştır)/.test(l)&&!/^(.+?)\s+ara$/.test(l.replace(/google\w*\s*(da|de)?\s*/,''))){const q=lastVis;lastVis=null;openUrl('https://www.google.com/search?q='+encodeURIComponent(q));return'Google\'da aratıyorum: '+q}
+  if(NATIVE&&/(canlı mod(a|u)?\s*(geç|aç|başlat)|canlı konuş|canlı moda|canlı olarak konuş)/.test(l))return await startLive();
   if(NATIVE&&/arka plan(da)? (testi|dene)/.test(l))return await szBgTest();
   if(/(ne yaptın|neler yaptın|son yaptıkların|yaptıklarını (say|anlat)|bugün ne yaptın|ne iş yaptın)/.test(l)){const a=store.get('alog',[]).filter(x=>Date.now()-x.t<864e5).slice(-5);if(!a.length)return'Bugün telefonda bir iş yapmadım.';return a.map(x=>new Date(x.t).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})+' '+x.s).join('. ')}
   if(NATIVE&&/arka plan modu/.test(l)){const off=/(kapat|kapa|durdur)/.test(l);store.set('bgOff',off);try{await bgClose()}catch(e){}return off?'Arka plan modunu kapattım. WhatsApp ekranda açılacak.':'Arka plan modunu açtım.'}

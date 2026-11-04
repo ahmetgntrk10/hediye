@@ -635,6 +635,11 @@ jobs:
               call.resolve();
             }
             @PluginMethod
+            public void wakePause(PluginCall call) {
+              WakeService.setPaused(call.getBoolean("on", false));
+              call.resolve();
+            }
+            @PluginMethod
             public void mediaVol(PluginCall call) {
               JSObject r = new JSObject();
               try { r.put("vol", ((AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE)).getStreamVolume(AudioManager.STREAM_MUSIC)); } catch (Exception e) { r.put("vol", 0); }
